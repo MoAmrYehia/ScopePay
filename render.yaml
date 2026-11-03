@@ -1,0 +1,32 @@
+# One-click deploy: Render dashboard → New → Blueprint → select this repository.
+# Secrets marked sync: false are entered in the Render dashboard, never committed.
+services:
+  - type: web
+    name: scopepay
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: PAYPAL_SANDBOX_BUYER_EMAIL
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+      - key: AI_DAILY_LIMIT
+        value: "300"
+    # The free plan has no persistent disk: demo data resets when the service
+    # restarts, and each visitor's workspace is re-seeded. For durable data use a
+    # paid plan, add a disk mounted at /var/data and set DATA_DIR=/var/data.
