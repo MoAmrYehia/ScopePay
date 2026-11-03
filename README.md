@@ -2,61 +2,120 @@
 
 **Connect the agreement, the delivered work, and the payment.**
 
-A responsive, single-user MVP for freelancers and small agencies. Includes a project dashboard, structured agreement import, three equal milestones, five-page acceptance checklist with agreement references, evidence attachment, human approval, invoices, reminders, and activity history.
+ScopePay helps freelancers and small agencies get paid for agreed work without the back-and-forth. AI reads the signed agreement and turns it into milestones with checkable acceptance conditions, each citing its clause. When work is delivered, AI checks the screenshots and documents against every condition and flags what is missing. The client reviews the evidence and accepts. Acceptance issues a PayPal invoice, and the payment closes the milestone.
 
-## Run
+AI prepares the evidence. People make the decisions. PayPal moves the money.
 
-Requires Node.js 22+ (tested on 24). No runtime packages are required.
+```mermaid
+flowchart LR
+  A[Agreement<br/>PDF · DOCX · MD] -->|AI extraction<br/>with clause citations| B[Milestones &<br/>acceptance criteria]
+  C[Delivered work<br/>screenshots · files] -->|AI vision review| D[Met · partial · missing<br/>per criterion]
+  B --> D
+  D --> E{Client portal<br/>accept or request changes}
+  F[Client request] -->|AI scope check| G[Change order<br/>priced from agreement rate]
+  G --> E
+  E -->|accepted| H[PayPal Invoicing v2<br/>create · send · remind]
+  H -->|webhook: INVOICE.PAID| I[Milestone paid]
+```
 
-```sh
-cd /workspace/ScopePay
+## The demo in one story
+
+A website agreement requires five pages in milestone 2. The designer uploads four screenshots.
+
+1. **AI review** finds the Portfolio page **missing** and the Services page **partial** (three of the four required packages), each with the clause it breaks (§3.4, §3.3).
+2. The designer uploads the fixes. The re-review shows **5 of 5 met**.
+3. The client writes: *"Can you also add a blog?"* **AI scope check** flags it as out of scope (§5.1) and drafts a change order priced at the agreement's $95/hour (§5.2).
+4. The designer shares the evidence pack. The **client portal** shows each screenshot next to each clause. The client types their name and accepts.
+5. Acceptance creates a **PayPal sandbox invoice** with the approval details. The designer sends it, the client pays with the sandbox buyer account, and the **webhook** marks the milestone paid.
+
+## How PayPal and AI are used
+
+| Step | AI | PayPal |
+|---|---|---|
+| Agreement → terms | Structured extraction (forced tool call). Every quote is checked verbatim against the source text; unverified quotes and inconsistent totals are flagged before the freelancer confirms. | |
+| Evidence review | Vision model inspects each screenshot and document text against each criterion, counts items, and links every verdict to evidence labels. | |
+| Scope check | Classifies a client request against deliverables and exclusions, quotes the deciding clause, estimates hours for a change order. | |
+| Client acceptance | | `POST /v2/invoicing/generate-next-invoice-number`, `POST /v2/invoicing/invoices` (idempotent `PayPal-Request-Id`, `Prefer: return=representation`) |
+| Invoicing | | `POST /v2/invoicing/invoices/{id}/send`, payer link from `detail.metadata.recipient_view_url` |
+| Follow-up | Drafts a short, friendly reminder that cites the approval date. | `POST /v2/invoicing/invoices/{id}/remind` |
+| Payment | | Webhooks `INVOICING.INVOICE.PAID / UPDATED / CANCELLED`, verified with `POST /v1/notifications/verify-webhook-signature`; status refresh with `GET /v2/invoicing/invoices/{id}` as a fallback |
+
+Human checkpoints are enforced by the server, not just the UI: terms are used only after the freelancer confirms them; a milestone can be shared only with a review that matches the current evidence; the client must type their name, and must explicitly acknowledge any open items; invoices are created only from a recorded approval.
+
+## Run it locally
+
+Requires Node.js 22+.
+
+```bash
 npm ci
-npm start
+npm start            # http://localhost:3000
 ```
 
-The server listens on port 3000; override with `PORT`. `npm run dev` restarts the server when its files change. The cloud command sandbox may require permission to bind a listening port.
+With no keys, ScopePay runs in **demo mode**: rule-based extraction for the sample agreement, file-name matching instead of AI review, and simulated invoices. Every screen labels which mode is active.
 
-## Try the demo
+To use the real integrations, copy `.env.example` to `.env` and fill in:
 
-1. Open Website redesign → Review evidence.
-2. See four pages matched and Portfolio missing, with the agreement reference. Approval is disabled.
-3. Add a screenshot or document as Portfolio evidence.
-4. Use “Client: approve milestone”, then create a demo invoice.
-5. Simulate payment and see the dashboard update. Reload to verify persistence.
+| Variable | Purpose |
+|---|---|
+| `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` | AI extraction, vision review, scope checks, reminders. Optional `AI_MODEL`. |
+| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Sandbox REST app credentials ([developer.paypal.com](https://developer.paypal.com) → Apps & Credentials → Sandbox). |
+| `PAYPAL_SANDBOX_BUYER_EMAIL` | Sandbox personal account. Prefilled as the client email so you can pay the invoice. |
+| `PAYPAL_WEBHOOK_ID` | Webhook on the same app, pointing at `https://<host>/api/webhooks/paypal`, subscribed to `INVOICING.INVOICE.PAID`, `INVOICING.INVOICE.UPDATED`, `INVOICING.INVOICE.CANCELLED`. |
+| `PUBLIC_URL` | Public base URL, used for client links inside invoices. |
 
-New project accepts a `.txt` agreement, a total USD value, three equally sized milestones, and Home, About, Services, Portfolio, and Contact pages. Use the prefilled example as the supported format. All five missing pages can receive evidence. Use Settings to reset the demo.
+PayPal calls go only to `api-m.sandbox.paypal.com`; production credentials are not supported by design.
 
-## Optional integrations
+## Deploy on Render
 
-Credentials stay on the server; never put them into browser source. Export the following through secure environment settings before restarting the server:
+1. Render dashboard → **New → Blueprint** → select this repository (`render.yaml` is included).
+2. Enter the secrets from the table above, and set `PUBLIC_URL` to the service URL.
+3. In the PayPal sandbox app, add the webhook URL and copy its ID into `PAYPAL_WEBHOOK_ID`.
 
-- `OPENAI_API_KEY`: enables the “Extract with AI” agreement action. Optional `OPENAI_MODEL` defaults to `gpt-4.1-mini`. Review extracted terms before accepting them.
-- `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`: sandbox REST app credentials.
-- `PAYPAL_INVOICER_EMAIL`: sandbox merchant account email.
-- `PAYPAL_RECIPIENT_EMAIL`: sandbox buyer account email.
+Each visitor gets an isolated workspace (cookie-based) seeded with the sample project, so several judges can try it at the same time. On the free plan data resets when the service restarts.
 
-When configured, invoice dialogs expose separate actions to create, send, retrieve status, and remind through PayPal Invoicing v2. Client acceptance is recorded on the server before sandbox invoice creation. Repeated creation reuses the same invoice and request ID. Only a PayPal `PAID` response from Refresh status marks a sandbox invoice paid. Complete payment using the sandbox buyer account in PayPal; the separate simulation action moves no funds. Sandbox IDs and approval records persist in ignored `data/invoices.json`.
+## Try it (2 minutes)
 
-Required HTTPS destinations: `api-m.sandbox.paypal.com` and, for AI, `api.openai.com`. Keep TLS verification enabled. In managed proxy environments use a Node version supporting environment proxy routing and start with `NODE_USE_ENV_PROXY=1 npm start`. The adapters have mock-based tests; live provider behavior has not been verified without credentials.
+1. Open **Website redesign** → milestone 2 → **Run AI review**.
+2. Under *Demo files*, add **Portfolio page** and **Services page (fixed)**, then **Re-run**.
+3. In **Scope checks**, click *"Can you also add a blog…"* → **Check against agreement** → **Send to client for approval**.
+4. **Share for client acceptance** → **Open client view**. Type a name, accept the milestone, approve the change order.
+5. Back in the workspace: **Send via PayPal**. Pay from the payer view with the sandbox buyer account (or **Simulate payment** in demo mode).
+6. **New project → Use the sample website agreement** shows extraction with clause highlighting. Upload your own PDF or DOCX agreement with an AI key set.
 
-## Validation
+## Tests
 
-```sh
-node --test tests/integrations.test.js
-# Start the app in another terminal first:
-npm test
+```bash
+npm test                                   # unit tests: extraction grounding, AI and PayPal adapters (network mocked)
+npm start & BASE_URL=http://localhost:3000 npm run test:e2e   # browser walkthrough of the full flow
 ```
 
-Browser checks use Playwright with `/usr/bin/chromium`; set `CHROMIUM_PATH` for another installed Chromium. Tests run in an isolated browser context and cover the missing-evidence approval guard, uploads, approval, invoice, simulated payment, persistence, agreement import, mobile overflow, and browser errors. Screenshots are written to `/tmp/scopepay-desktop.png` and `/tmp/scopepay-mobile.png`.
+The browser walkthrough uses Playwright (`CHROMIUM_PATH` to use an installed Chromium) and writes screenshots to `test-results/`. It runs in demo mode in CI, and against live AI and PayPal sandbox when keys are set.
 
-## MVP boundaries
+## Project structure
 
-This is a local demonstration, not a public multi-user payment service. The client approval button represents the client role in the same browser; there is no authentication, shareable client portal, authorization model, or immutable audit log. Do not expose it publicly or use production payment credentials. Approval endpoints are for this single-user sandbox workflow.
+```
+server/
+  index.js        HTTP server, API routes, client portal, webhook receiver
+  workflow.js     state machine: evidence → review → approval → invoice → payment
+  paypal.js       Invoicing v2 adapter, webhook verification, simulated adapter
+  ai/provider.js  OpenAI / Anthropic structured calls with image input
+  ai/extract.js   agreement extraction and quote grounding
+  ai/evidence.js  vision review of deliverables
+  ai/scope.js     scope checks, change orders, reminder drafts
+  store.js        JSON-file store with per-visitor workspaces
+public/           workspace app and client portal (vanilla JS modules, no build step)
+samples/          sample agreement and evidence screenshots (scripts/ regenerates them)
+tests/            unit tests and the end-to-end walkthrough
+```
 
-Default extraction uses template rules. Evidence matching uses page labels and file names, not visual understanding or document content analysis. Uploaded file contents are not retained or analyzed; the file name becomes the reference, and a human must inspect the actual delivered work separately. Agreement quotes in the seeded scenario are illustrative. Browser project state uses localStorage, independently of server sandbox invoice records. Demo payments and reminder drafts never contact PayPal or send email. Google Fonts is optional; system fonts provide the fallback.
+## Limits
 
-## GitHub Pages demo
+This is a hackathon MVP. There are no user accounts: the workspace is tied to a browser cookie and the client portal to an unguessable link. Data is stored in a JSON file. AI verdicts can be wrong, which is why every verdict shows its evidence and clause, and the client makes the decision.
 
-Pushing to `main` runs `.github/workflows/deploy-pages.yml` and deploys only `public/` to GitHub Pages. The workflow attempts to enable Pages automatically. If repository policy prevents that, select **GitHub Actions** under repository **Settings → Pages → Build and deployment**, then rerun the workflow.
+## Built with
 
-The Pages version is the static demo: template extraction, evidence labels, simulated client approval, and simulated invoices/payments in browser storage. Node API routes and AI/PayPal adapters do not run on Pages. Use a Node-capable host for those optional integrations. No secrets, server files, or invoice records are uploaded by the Pages workflow.
+Node.js · PayPal Invoicing v2 REST API and webhooks (sandbox) · OpenAI or Anthropic models (vision and tool use) · unpdf · mammoth · Playwright · Render
+
+## License
+
+[MIT](LICENSE)

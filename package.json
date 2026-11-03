@@ -4,14 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "test": "node tests/workflow.mjs"
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --watch --env-file-if-exists=.env server/index.js",
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "node tests/e2e.mjs",
+    "samples": "node scripts/generate-sample-evidence.mjs"
   },
   "engines": {
     "node": ">=22"
   },
   "devDependencies": {
     "playwright": "1.64.1"
-  }
+  },
+  "dependencies": {
+    "mammoth": "^1.13.0",
+    "unpdf": "^1.9.1"
+  },
+  "description": "Turn agreed work into evidence-backed PayPal invoices.",
+  "license": "MIT"
 }
