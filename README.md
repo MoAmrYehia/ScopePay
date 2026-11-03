@@ -54,3 +54,9 @@ Browser checks use Playwright with `/usr/bin/chromium`; set `CHROMIUM_PATH` for 
 This is a local demonstration, not a public multi-user payment service. The client approval button represents the client role in the same browser; there is no authentication, shareable client portal, authorization model, or immutable audit log. Do not expose it publicly or use production payment credentials. Approval endpoints are for this single-user sandbox workflow.
 
 Default extraction uses template rules. Evidence matching uses page labels and file names, not visual understanding or document content analysis. Uploaded file contents are not retained or analyzed; the file name becomes the reference, and a human must inspect the actual delivered work separately. Agreement quotes in the seeded scenario are illustrative. Browser project state uses localStorage, independently of server sandbox invoice records. Demo payments and reminder drafts never contact PayPal or send email. Google Fonts is optional; system fonts provide the fallback.
+
+## GitHub Pages demo
+
+Pushing to `main` runs `.github/workflows/deploy-pages.yml` and deploys only `public/` to GitHub Pages. The workflow attempts to enable Pages automatically. If repository policy prevents that, select **GitHub Actions** under repository **Settings → Pages → Build and deployment**, then rerun the workflow.
+
+The Pages version is the static demo: template extraction, evidence labels, simulated client approval, and simulated invoices/payments in browser storage. Node API routes and AI/PayPal adapters do not run on Pages. Use a Node-capable host for those optional integrations. No secrets, server files, or invoice records are uploaded by the Pages workflow.
