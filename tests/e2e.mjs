@@ -1,4 +1,5 @@
-// Browser walkthrough of the full demo flow. Start the server first, then:
+// Browser walkthrough: the public website, the demo flow end to end, and a new
+// account from sign-up to its first project. Start the server first, then:
 //   BASE_URL=http://localhost:3000 node tests/e2e.mjs
 // Works in demo mode (no keys) and with live AI / PayPal sandbox keys.
 // Screenshots are written to SHOT_DIR (default: ./test-results).
@@ -22,8 +23,22 @@ context.on('requestfailed', (r) => !/fonts\.(googleapis|gstatic)\.com/.test(r.ur
 const shot = (name, p = page) => p.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });
 const step = (msg) => console.log('✓', msg);
 
+// 0. Public website
+await page.goto(BASE);
+await page.getByRole('heading', { name: 'Get paid for the work you agreed to.' }).waitFor();
+await shot('00-home');
+for (const [path, heading] of [['/how-it-works', 'From signed agreement to paid invoice'], ['/pricing', 'Free while ScopePay is in beta'], ['/security', 'Security at ScopePay'], ['/privacy', 'Privacy policy'], ['/terms', 'Terms of use']]) {
+  await page.goto(BASE + path);
+  await page.getByRole('heading', { level: 1, name: heading }).waitFor();
+}
+await shot('00-how-it-works');
+await page.goto(BASE + '/app');
+assert.match(page.url(), /\/signin\?next=\/app$/, 'signed-out visitors are sent to sign in');
+step('website pages load; /app requires sign-in or the demo');
+
 // 1. Overview with the seeded sample project
 await page.goto(BASE);
+await page.getByRole('link', { name: 'Try the live demo' }).first().click();
 await page.getByRole('heading', { name: 'Your projects' }).waitFor();
 await shot('01-overview');
 step('overview loads with sample project');
@@ -100,10 +115,10 @@ await page.getByRole('button', { name: /Draft reminder/ }).count();
 await shot('08-paid');
 
 // 8. Invoices page and new-project extraction
-await page.goto(BASE + '/#/invoices');
+await page.goto(BASE + '/app#/invoices');
 await page.getByRole('heading', { name: 'Invoices' }).waitFor();
 await shot('09-invoices');
-await page.goto(BASE + '/#/new');
+await page.goto(BASE + '/app#/new');
 await page.getByRole('button', { name: /Use the sample website agreement/ }).click();
 await page.getByRole('heading', { name: 'Agreement' }).waitFor({ timeout: 120_000 });
 await shot('10-extracted-terms');
@@ -112,9 +127,48 @@ await page.getByRole('button', { name: /Confirm terms/ }).click();
 await page.getByRole('heading', { name: 'Acceptance checklist' }).waitFor();
 step('new project created from extracted terms');
 
-// 9. Mobile layout has no horizontal overflow
+// 9. A new account: sign up, empty workspace, sample project, settings, sign out
+const fresh = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const user = await fresh.newPage();
+user.on('pageerror', (e) => errors.push('signup: ' + e.message));
+const email = `e2e-${Date.now()}@example.com`;
+await user.goto(BASE + '/signup');
+await user.getByLabel('Your name', { exact: true }).fill('Riley Chen');
+await user.getByLabel(/Business name/).fill('Chen Digital');
+await user.getByLabel('Email').fill(email);
+await user.getByLabel(/^Password/).fill('short');
+await user.getByRole('button', { name: 'Create account' }).click();
+await user.getByText('Use a password of at least 10 characters.').waitFor();
+await user.getByLabel(/^Password/).fill('a much longer password');
+await user.getByRole('button', { name: 'Create account' }).click();
+await user.getByRole('heading', { name: 'Start with a signed agreement' }).waitFor();
+assert.match(await user.locator('.page-band h1').innerText(), /Riley/);
+await shot('20-new-account', user);
+await user.getByRole('button', { name: 'Add the sample project' }).click();
+await user.getByRole('heading', { name: 'Acceptance checklist' }).waitFor();
+await user.goto(BASE + '/app#/settings');
+await user.getByLabel('Business name').fill('Chen Digital Ltd');
+await user.getByRole('button', { name: 'Save profile' }).click();
+await user.getByText(/Clients now see Chen Digital Ltd/).waitFor();
+await user.getByRole('button', { name: /Account menu/ }).click();
+await user.getByRole('menuitem', { name: 'Sign out' }).click();
+await user.waitForURL(BASE + '/');
+await user.goto(BASE + '/signin');
+await user.getByLabel('Email').fill(email);
+await user.getByLabel('Password').fill('a much longer password');
+await user.getByRole('button', { name: 'Sign in' }).click();
+await user.getByRole('heading', { name: 'Your projects' }).waitFor();
+assert.equal(await user.locator('.project-row').count(), 1, 'the account keeps its own project only');
+await fresh.close();
+step('new account: sign up, sample project, settings, sign out and back in');
+
+// 10. Mobile layout has no horizontal overflow
 await page.setViewportSize({ width: 390, height: 844 });
 await page.goto(BASE);
+await page.getByRole('heading', { name: 'Get paid for the work you agreed to.' }).waitFor();
+assert.ok((await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, 'mobile overflow on home page');
+await shot('10-mobile-home');
+await page.goto(BASE + '/app');
 await page.getByRole('heading', { name: 'Your projects' }).waitFor();
 const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 assert.ok((await overflow()) <= 1, `mobile overflow on overview: ${await overflow()}px`);

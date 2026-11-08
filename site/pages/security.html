@@ -1,0 +1,21 @@
+<!--{"title": "Security", "description": "How ScopePay protects your account, your clients' review links, your files and your payments."}-->
+<section class="page-hero">
+  <div class="wrap">
+    <h1>Security at ScopePay</h1>
+    <p class="lede">ScopePay sits between an agreement and a payment, so it is built to keep both trustworthy. Here is exactly how.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="facts-grid">
+      <div><h3>Payments stay in PayPal</h3><p>Invoices are created, sent and paid in PayPal. ScopePay never receives funds and never sees card or bank details. Payment updates arrive by PayPal webhook, and ScopePay verifies each one with PayPal before trusting it.</p></div>
+      <div><h3>Accounts</h3><ul><li>Passwords are hashed with scrypt and a unique salt, never stored as text.</li><li>Sessions use random tokens in secure, HttpOnly cookies; only a hash of each token is stored.</li><li>Repeated failed sign-ins are throttled by address and by email.</li></ul></div>
+      <div><h3>Client review links</h3><p>Each project has an unguessable review link (192 bits of randomness). It is placed after the # in the URL, so it is not sent to servers or leaked through referrer headers. A link only shows that one project.</p></div>
+      <div><h3>Your data</h3><ul><li>Agreements, evidence files and project records are stored in a managed Postgres database.</li><li>Each account sees only its own projects; every request is checked against the signed-in account.</li><li>Deleting your account removes your projects, files and sessions.</li></ul></div>
+      <div><h3>AI, with people in charge</h3><ul><li>Documents and client messages are treated as data, never as instructions to the AI.</li><li>Every extracted term and verdict cites its source, and quotes that do not match the agreement are flagged.</li><li>The AI never accepts work or sends money. You confirm terms; your client accepts.</li></ul></div>
+      <div><h3>Web protections</h3><ul><li>All traffic is served over HTTPS.</li><li>State-changing requests from other websites are rejected.</li><li>Uploaded files are checked by type and size and served with strict content headers.</li></ul></div>
+    </div>
+    <p style="margin-top:28px;color:var(--ink-2)">Found a problem? Please open a private security advisory on our <a href="https://github.com/MoAmrYehia/ScopePay/security">GitHub repository</a>.</p>
+  </div>
+</section>

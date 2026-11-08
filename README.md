@@ -2,6 +2,8 @@
 
 **Connect the agreement, the delivered work, and the payment.**
 
+**Live:** https://scopepay-wjm5.onrender.com · [Try the demo](https://scopepay-wjm5.onrender.com/demo) (no account needed)
+
 ScopePay helps freelancers and small agencies get paid for agreed work without the back-and-forth. AI reads the signed agreement and turns it into milestones with checkable acceptance conditions, each citing its clause. When work is delivered, AI checks the screenshots and documents against every condition and flags what is missing. The client reviews the evidence and accepts. Acceptance issues a PayPal invoice, and the payment closes the milestone.
 
 AI prepares the evidence. People make the decisions. PayPal moves the money.
@@ -62,6 +64,7 @@ To use the real integrations, copy `.env.example` to `.env` and fill in:
 | `PAYPAL_SANDBOX_BUYER_EMAIL` | Sandbox personal account. Prefilled as the client email so you can pay the invoice. |
 | `PAYPAL_WEBHOOK_ID` | Webhook on the same app, pointing at `https://<host>/api/webhooks/paypal`, subscribed to `INVOICING.INVOICE.PAID`, `INVOICING.INVOICE.UPDATED`, `INVOICING.INVOICE.CANCELLED`. |
 | `PUBLIC_URL` | Public base URL, used for client links inside invoices. |
+| `DATABASE_URL` | Postgres connection string. Without it, data is stored as JSON files in `DATA_DIR`. |
 
 PayPal calls go only to `api-m.sandbox.paypal.com`; production credentials are not supported by design.
 
@@ -71,11 +74,23 @@ PayPal calls go only to `api-m.sandbox.paypal.com`; production credentials are n
 2. Enter the secrets from the table above, and set `PUBLIC_URL` to the service URL.
 3. In the PayPal sandbox app, add the webhook URL and copy its ID into `PAYPAL_WEBHOOK_ID`.
 
-Each visitor gets an isolated workspace (cookie-based) seeded with the sample project, so several judges can try it at the same time. On the free plan data resets when the service restarts.
+The blueprint also creates a free Render Postgres database and connects it through `DATABASE_URL`, so accounts, projects and evidence files survive restarts. Render's free database expires after 30 days unless its plan is upgraded.
+
+## The website and accounts
+
+| Path | What it is |
+|---|---|
+| `/` | Landing page; also `/how-it-works`, `/pricing`, `/security`, `/privacy`, `/terms` |
+| `/signup`, `/signin` | Accounts: email and password (scrypt-hashed), 30-day HttpOnly session cookie |
+| `/app` | The freelancer app. Requires an account or the demo |
+| `/demo` | Starts a demo workspace with the sample project, kept for 7 days of inactivity |
+| `/portal.html#<token>` | The client's private review page; no account needed |
+
+Each account sees only its own projects. Its business name appears on client review pages and PayPal invoices. Settings covers profile, password change and account deletion.
 
 ## Try it (2 minutes)
 
-1. Open **Website redesign** → milestone 2 → **Run AI review**.
+1. Open the site and choose **Try the live demo** (or create an account and add the sample project). Open **Website redesign** → milestone 2 → **Run AI review**.
 2. Under *Demo files*, add **Portfolio page** and **Services page (fixed)**, then **Re-run**.
 3. In **Scope checks**, click *"Can you also add a blog…"* → **Check against agreement** → **Send to client for approval**.
 4. **Share for client acceptance** → **Open client view**. Type a name, accept the milestone, approve the change order.
@@ -102,15 +117,18 @@ server/
   ai/extract.js   agreement extraction and quote grounding
   ai/evidence.js  vision review of deliverables
   ai/scope.js     scope checks, change orders, reminder drafts
-  store.js        JSON-file store with per-visitor workspaces
-public/           workspace app and client portal (vanilla JS modules, no build step)
+  store.js        Postgres or JSON-file storage: projects, users, sessions, evidence files
+  auth.js         accounts: password hashing, sessions, throttling, profile, deletion
+  site.js         renders the public website pages into a shared layout
+public/           app, client portal, website styles, self-hosted fonts, screenshots
+site/             public website pages (landing, how it works, pricing, security, legal, sign in)
 samples/          sample agreement and evidence screenshots (scripts/ regenerates them)
 tests/            unit tests and the end-to-end walkthrough
 ```
 
 ## Limits
 
-This is a hackathon MVP. There are no user accounts: the workspace is tied to a browser cookie and the client portal to an unguessable link. Data is stored in a JSON file. AI verdicts can be wrong, which is why every verdict shows its evidence and clause, and the client makes the decision.
+This is a hackathon project. Accounts have no email verification or password reset yet, since that needs an email provider. AI verdicts can be wrong, which is why every verdict shows its evidence and clause, and the client makes the decision. Website screenshots are produced by `scripts/capture-site-images.mjs`; re-run it with an AI key set to show real AI verdicts.
 
 ## Built with
 

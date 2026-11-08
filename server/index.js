@@ -1,16 +1,17 @@
-// ScopePay server: JSON API for the freelancer workspace, a token-based client
-// portal, and the PayPal webhook receiver. Static files are served from /public.
+// ScopePay server: the public website, accounts, the JSON API for the
+// freelancer app, a token-based client portal, and the PayPal webhook receiver.
 
 import http from 'node:http';
-import crypto from 'node:crypto';
 import path from 'node:path';
 import { config, capabilities } from './config.js';
-import { createRouter, readBody, sendJson, parseCookies, serveStatic, sendFile } from './http.js';
+import { createRouter, readBody, sendJson, serveStatic, sendFile } from './http.js';
 import { loadStore, listProjects, getProject, getProjectByPortalToken, findInvoice, createProject, saveProject, deleteWorkspace, logActivity } from './store.js';
 import { extractAgreement } from './ai/extract.js';
 import { decodeUpload, documentText, badRequest } from './documents.js';
 import { verifyWebhook } from './paypal.js';
-import { ensureSeeded } from './seed.js';
+import { ensureSeeded, addSampleProject, DEMO_FREELANCER } from './seed.js';
+import * as auth from './auth.js';
+import { renderSitePage, SITE_PAGES } from './site.js';
 import * as flow from './workflow.js';
 
 const PUBLIC_DIR = path.resolve('public');
@@ -35,7 +36,7 @@ function portalView(project) {
     name: project.name,
     client: project.client,
     currency: project.currency,
-    freelancer: config.paypal.businessName,
+    freelancer: project.freelancer?.businessName || config.paypal.businessName,
     agreement: project.agreement,
     terms: project.terms,
     evidence: project.evidence.map(({ text, ...e }) => e),
@@ -47,27 +48,82 @@ function portalView(project) {
   };
 }
 
-// --- workspace session -------------------------------------------------------------
+// --- who is calling: a signed-in user or a demo visitor ------------------------------
 
 const seeding = new Map();
 
-async function workspaceFor(req, res) {
-  let id = parseCookies(req.headers.cookie).sp_ws;
-  if (!/^ws_[A-Za-z0-9_-]{20,}$/.test(id || '')) {
-    id = 'ws_' + crypto.randomBytes(18).toString('base64url');
-    const secure = (req.headers['x-forwarded-proto'] || '').includes('https') ? '; Secure' : '';
-    res.setHeader('Set-Cookie', `sp_ws=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}`);
+async function identify(req, ctx) {
+  const user = auth.currentUser(req);
+  if (user) {
+    Object.assign(ctx, { user, workspace: user.id, freelancer: { name: user.name, businessName: user.businessName, email: user.email } });
+    return;
   }
-  if (!seeding.has(id)) seeding.set(id, ensureSeeded(id).catch((e) => (seeding.delete(id), Promise.reject(e))));
-  await seeding.get(id);
-  return id;
+  const demo = auth.demoWorkspace(req);
+  if (demo) {
+    if (!seeding.has(demo)) seeding.set(demo, ensureSeeded(demo).catch((e) => (seeding.delete(demo), Promise.reject(e))));
+    await seeding.get(demo);
+    Object.assign(ctx, { demo: true, workspace: demo, freelancer: DEMO_FREELANCER });
+  }
 }
 
+const requireWorkspace = (ctx) => {
+  if (!ctx.workspace) throw Object.assign(new Error('Sign in to continue.'), { status: 401 });
+};
 const project = (ctx) => getProject(ctx.workspace, ctx.params.id) || (() => { throw notFound('Project not found.'); })();
+const clientIp = (req) => (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+
+// --- session and accounts ------------------------------------------------------------
+
+api.get('/api/session', async (ctx) => ({
+  user: auth.publicUser(ctx.user),
+  demo: Boolean(ctx.demo),
+  freelancer: ctx.freelancer || null,
+  capabilities: capabilities(),
+  defaults: { clientEmail: config.paypal.defaultRecipientEmail || (config.paypal.mode === 'simulated' ? 'client@example.com' : '') },
+}));
+
+api.post('/api/auth/signup', async (ctx) => {
+  const user = await auth.signUp(ctx.body);
+  await auth.startSession(ctx.req, ctx.res, user);
+  return { user: auth.publicUser(user) };
+});
+
+api.post('/api/auth/signin', async (ctx) => {
+  const user = await auth.signIn(ctx.body, clientIp(ctx.req));
+  await auth.startSession(ctx.req, ctx.res, user);
+  return { user: auth.publicUser(user) };
+});
+
+api.post('/api/auth/signout', async (ctx) => {
+  await auth.endSession(ctx.req, ctx.res);
+  return { ok: true };
+});
+
+api.post('/api/account', async (ctx) => {
+  if (!ctx.user) throw Object.assign(new Error('Sign in to continue.'), { status: 401 });
+  const user = await auth.updateProfile(ctx.user, ctx.body);
+  // Keep the name clients see on open projects in step with the profile.
+  for (const p of listProjects(user.id)) {
+    p.freelancer = { name: user.name, businessName: user.businessName, email: user.email };
+    await saveProject(p);
+  }
+  return { user: auth.publicUser(user) };
+});
+
+api.post('/api/account/password', async (ctx) => {
+  if (!ctx.user) throw Object.assign(new Error('Sign in to continue.'), { status: 401 });
+  await auth.changePassword(ctx.user, ctx.body);
+  return { ok: true };
+});
+
+api.post('/api/account/delete', async (ctx) => {
+  if (!ctx.user) throw Object.assign(new Error('Sign in to continue.'), { status: 401 });
+  await auth.deleteAccount(ctx.user, ctx.body);
+  await auth.endSession(ctx.req, ctx.res);
+  return { ok: true };
+});
 
 // --- workspace API -------------------------------------------------------------------
-
-api.get('/api/session', async () => ({ capabilities: capabilities(), defaults: { clientEmail: config.paypal.defaultRecipientEmail || (config.paypal.mode === 'simulated' ? 'client@example.com' : '') } }));
 
 api.get('/api/projects', async (ctx) => listProjects(ctx.workspace).map((p) => workspaceView(p, ctx.origin)));
 
@@ -104,6 +160,7 @@ api.post('/api/projects', async (ctx) => {
   }
   const p = createProject({
     workspaceId: ctx.workspace,
+    freelancer: ctx.freelancer,
     name: String(name || terms.projectName || 'New project').slice(0, 120),
     client: { name: String(client?.name || terms.clientName || 'Client').slice(0, 120), email },
     agreement: { filename: String(agreement.filename || 'agreement').slice(0, 120), text: String(agreement.text).slice(0, 60000) },
@@ -135,7 +192,10 @@ api.post('/api/projects/:id/invoices/:invoiceId/reminder-draft', async (ctx) => 
 api.post('/api/projects/:id/invoices/:invoiceId/remind', async (ctx) => workspaceView(await flow.sendReminder(project(ctx), ctx.params.invoiceId, ctx.body), ctx.origin));
 api.post('/api/projects/:id/invoices/:invoiceId/simulate-payment', async (ctx) => workspaceView(await flow.simulatePayment(project(ctx), ctx.params.invoiceId), ctx.origin));
 
+api.post('/api/workspace/sample', async (ctx) => workspaceView(await addSampleProject(ctx.workspace, ctx.freelancer), ctx.origin));
+
 api.post('/api/workspace/reset', async (ctx) => {
+  if (!ctx.demo) throw Object.assign(new Error('Only the demo workspace can be reset.'), { status: 403 });
   await deleteWorkspace(ctx.workspace);
   seeding.delete(ctx.workspace);
   await ensureSeeded(ctx.workspace);
@@ -190,13 +250,22 @@ async function handleWebhook(req, res) {
 
 const AI_ROUTES = /\/(extract|review|scope-checks|reminder-draft)$/;
 const rate = new Map();
-function rateLimited(req) {
-  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+function rateLimited(req, limit = 12) {
   const minute = Math.floor(Date.now() / 60000);
-  const key = `${ip}:${minute}`;
+  const key = `${clientIp(req)}:${limit}:${minute}`;
   rate.set(key, (rate.get(key) || 0) + 1);
   if (rate.size > 5000) rate.clear();
-  return rate.get(key) > 12;
+  return rate.get(key) > limit;
+}
+
+function redirect(res, location) {
+  res.writeHead(302, { Location: location, 'Cache-Control': 'no-store' });
+  res.end();
+}
+
+function sendHtml(res, html, status = 200) {
+  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin' });
+  res.end(html);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -215,7 +284,7 @@ const server = http.createServer(async (req, res) => {
         if (req.headers.origin && req.headers.origin !== origin) return sendJson(res, { error: 'Cross-origin requests are not allowed.' }, 403);
         if (req.method === 'POST' && AI_ROUTES.test(url.pathname) && rateLimited(req)) return sendJson(res, { error: 'Too many AI requests. Wait a minute and try again.' }, 429);
       }
-      const ctx = { params: route.params, query: url.searchParams, origin, body: {} };
+      const ctx = { req, res, params: route.params, query: url.searchParams, origin, body: {} };
       if (req.method === 'POST') {
         const raw = await readBody(req);
         try {
@@ -224,17 +293,40 @@ const server = http.createServer(async (req, res) => {
           throw badRequest('Invalid JSON body.');
         }
       }
-      if (!url.pathname.startsWith('/api/portal/')) ctx.workspace = await workspaceFor(req, res);
+      if (!url.pathname.startsWith('/api/portal/')) {
+        await identify(req, ctx);
+        const open = ['/api/session', '/api/auth/signup', '/api/auth/signin', '/api/auth/signout', '/api/account', '/api/account/password', '/api/account/delete'];
+        if (!open.includes(url.pathname)) requireWorkspace(ctx);
+        if (url.pathname.startsWith('/api/auth/sign') && url.pathname !== '/api/auth/signout' && rateLimited(req, 20)) {
+          return sendJson(res, { error: 'Too many attempts. Wait a minute and try again.' }, 429);
+        }
+      }
       const result = await route.handler(ctx);
       if (result?.file) return sendFile(res, result.file.buffer, result.file.item.mime, result.file.item.filename);
       return sendJson(res, result);
     }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, { error: 'Method not allowed.' }, 405);
+    const pathname = url.pathname.replace(/\/+$/, '') || '/';
+    const user = auth.currentUser(req);
+
+    // The app: signed-in users, or visitors who chose the demo.
+    if (pathname === '/demo') {
+      if (user) return redirect(res, '/app');
+      if (!auth.demoWorkspace(req)) auth.newDemoWorkspace(req, res);
+      return redirect(res, '/app');
+    }
+    if (pathname === '/app' || pathname === '/app.html') {
+      if (!user && !auth.demoWorkspace(req)) return redirect(res, '/signin?next=/app');
+      return void (await serveStatic(res, PUBLIC_DIR, '/app.html'));
+    }
+    if ((pathname === '/signin' || pathname === '/signup') && user) return redirect(res, '/app');
+
+    // The public website.
+    if (SITE_PAGES.has(pathname)) return sendHtml(res, await renderSitePage(pathname, { user }));
     if (url.pathname.startsWith('/samples/') && (await serveStatic(res, SAMPLES_DIR, url.pathname.slice('/samples'.length)))) return;
-    const file = url.pathname === '/' ? '/index.html' : url.pathname;
-    if (await serveStatic(res, PUBLIC_DIR, file)) return;
-    sendJson(res, { error: 'Not found.' }, 404);
+    if (await serveStatic(res, PUBLIC_DIR, url.pathname)) return;
+    sendHtml(res, await renderSitePage('/404', { user }), 404);
   } catch (error) {
     const status = error.status || 500;
     if (status >= 500) console.error(error);
@@ -242,8 +334,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-await loadStore();
+const storage = await loadStore();
 server.listen(config.port, '0.0.0.0', () => {
   const caps = capabilities();
-  console.log(`ScopePay on http://localhost:${config.port}  ·  AI: ${caps.ai.provider} (${caps.ai.model})  ·  PayPal: ${caps.payments.mode}${caps.payments.webhooks ? ' + webhooks' : ''}`);
+  console.log(`ScopePay on http://localhost:${config.port}  ·  storage: ${storage}  ·  AI: ${caps.ai.provider} (${caps.ai.model})  ·  PayPal: ${caps.payments.mode}${caps.payments.webhooks ? ' + webhooks' : ''}`);
 });

@@ -13,11 +13,36 @@ const NAV = [
   ['#/activity', 'Activity'],
 ];
 
+const initials = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || 'S';
+
+function accountMenu() {
+  const { user, freelancer } = app.session;
+  if (user) {
+    return `<div class="menu-wrap"><button class="avatar" data-action="menu" aria-haspopup="true" aria-expanded="false" aria-label="Account menu for ${esc(user.name)}">${esc(initials(user.name))}</button>
+      <div class="menu" role="menu" hidden>
+        <div class="menu-head"><b>${esc(user.name)}</b><span>${esc(user.email)}</span></div>
+        <a role="menuitem" href="#/settings">Settings</a>
+        <a role="menuitem" href="/">ScopePay website</a>
+        <button role="menuitem" data-action="signout">Sign out</button>
+      </div></div>`;
+  }
+  return `<div class="menu-wrap"><button class="avatar" data-action="menu" aria-haspopup="true" aria-expanded="false" aria-label="Demo menu">${esc(initials(freelancer.name))}</button>
+    <div class="menu" role="menu" hidden>
+      <div class="menu-head"><b>Demo workspace</b><span>Signed in as the sample freelancer</span></div>
+      <a role="menuitem" href="/signup">Create your account</a>
+      <button role="menuitem" data-action="reset">Reset demo</button>
+      <a role="menuitem" href="/">Leave the demo</a>
+    </div></div>`;
+}
+
 function shell(active) {
   const caps = app.session.capabilities;
   const ai = caps.ai.live ? `AI review: ${caps.ai.provider === 'anthropic' ? 'Claude' : 'OpenAI'}` : 'AI review: demo rules';
   const pay = caps.payments.live ? `PayPal sandbox${caps.payments.webhooks ? ' with webhooks' : ''}` : 'PayPal: simulated';
-  const demo = !caps.ai.live || !caps.payments.live;
+  const servicesDemo = !caps.ai.live || !caps.payments.live;
+  const notes = [];
+  if (app.session.demo) notes.push('You are in the live demo. Changes stay in this browser for 7 days. <a href="/signup">Create a free account</a> to keep your own projects.');
+  if (servicesDemo) notes.push(`${!caps.payments.live ? 'Invoices are simulated and no money moves. ' : ''}${!caps.ai.live ? 'Evidence checks use file names instead of AI.' : ''}`);
   return `
     <header class="topnav"><div class="inner">
       <a class="logo" href="#/" aria-label="ScopePay overview"><span class="logo-mark">S</span>ScopePay</a>
@@ -25,12 +50,12 @@ function shell(active) {
       <div class="nav-right">
         <span class="status-item"><span class="led ${caps.ai.live ? 'live' : ''}"></span>${esc(ai)}</span>
         <span class="status-item"><span class="led ${caps.payments.live ? 'live' : ''}"></span>${esc(pay)}</span>
-        <span class="avatar" title="Jamie Lee Studio">JL</span>
+        ${accountMenu()}
       </div>
     </div></header>
-    ${demo ? `<div class="mode-banner"><div class="inner">${icon('alert')}<span>Demo mode. ${!caps.payments.live ? 'Invoices are simulated, no money moves. ' : ''}${!caps.ai.live ? 'Evidence checks use file names instead of AI. ' : ''}Add API keys to use the live services.</span></div></div>` : ''}
+    ${notes.length ? `<div class="mode-banner"><div class="inner">${icon('alert')}<span>${notes.join(' ')}</span></div></div>` : ''}
     <main id="view"></main>
-    <div class="footer-note"><span>Payments are processed by PayPal. ScopePay never stores card or bank details.</span><button class="reset" data-action="reset">Reset demo workspace</button></div>`;
+    <div class="footer-note"><span>Payments are processed by PayPal. ScopePay never stores card or bank details.</span><span><a href="/privacy">Privacy</a> &nbsp; <a href="/terms">Terms</a></span></div>`;
 }
 
 // --- derived numbers --------------------------------------------------------------
@@ -94,8 +119,19 @@ function overview(view) {
   const awaiting = app.projects.flatMap((p) => p.terms.milestones.filter((m) => m.status === 'submitted').map((m) => ({ ...m, currency: p.currency })));
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const { freelancer } = app.session;
+  const band = pageBand(`${greeting}, ${freelancer.name.split(' ')[0]}`, { sub: esc(freelancer.businessName), actions: `<a class="btn primary" href="#/new">${icon('plus')} New project</a>` });
+  if (!app.projects.length) {
+    view.innerHTML = `${band}<div class="content"><section class="card welcome">
+      <h2>Start with a signed agreement</h2>
+      <p class="sub">Upload the agreement for a project you are working on. ScopePay extracts its milestones and acceptance conditions, and you confirm them before anything else happens.</p>
+      <div class="actions" style="margin-top:20px"><a class="btn primary" href="#/new">${icon('plus')} New project from an agreement</a><button class="btn" data-action="add-sample">Add the sample project</button></div>
+      <p class="sub" style="margin-top:16px">The sample is a website redesign with one milestone paid and one ready to review, so you can try every step.</p>
+    </section></div>`;
+    return;
+  }
   view.innerHTML = `
-    ${pageBand(`${greeting}, Jamie`, { sub: 'Jamie Lee Studio, freelancer account', actions: `<a class="btn primary" href="#/new">${icon('plus')} New project</a>` })}
+    ${band}
     <div class="content">
       <section class="card summary" aria-label="Account summary">
         <div><div class="label">Collected to date</div>
@@ -144,6 +180,36 @@ function invoicesPage(view) {
     </table></section></div>`;
 }
 
+function settingsPage(view) {
+  const { user } = app.session;
+  if (!user) {
+    view.innerHTML = `${pageBand('Settings')}<div class="content"><section class="card card-body"><p>The demo has no account settings. <a href="/signup">Create a free account</a> to keep your own projects and send invoices under your business name.</p></section></div>`;
+    return;
+  }
+  view.innerHTML = `${pageBand('Settings', { sub: `Signed in as ${esc(user.email)}` })}
+    <div class="content"><div class="settings">
+      <section class="card"><div class="card-head"><h2>Profile</h2></div>
+        <form class="card-body form-grid" data-form="profile">
+          <label class="field">Your name<input type="text" name="name" value="${esc(user.name)}" autocomplete="name" required></label>
+          <label class="field">Business name<input type="text" name="businessName" value="${esc(user.businessName)}" autocomplete="organization"></label>
+          <p class="sub" style="grid-column:1/-1;margin:0">Your business name appears on client review pages and on PayPal invoices.</p>
+          <div class="actions"><button class="btn primary" type="submit">Save profile</button></div>
+        </form></section>
+      <section class="card"><div class="card-head"><h2>Password</h2></div>
+        <form class="card-body form-grid" data-form="password">
+          <label class="field">Current password<input type="password" name="currentPassword" autocomplete="current-password" required></label>
+          <label class="field">New password<input type="password" name="newPassword" autocomplete="new-password" minlength="10" required></label>
+          <div class="actions"><button class="btn primary" type="submit">Change password</button></div>
+        </form></section>
+      <section class="card"><div class="card-head"><h2>Delete account</h2></div>
+        <form class="card-body form-grid" data-form="delete">
+          <p class="sub" style="grid-column:1/-1;margin:0">Deletes your account, all projects and evidence files. Invoices already created in PayPal stay in your PayPal account. This cannot be undone.</p>
+          <label class="field">Password<input type="password" name="password" autocomplete="current-password" required></label>
+          <div class="actions"><button class="btn danger" type="submit">Delete my account</button></div>
+        </form></section>
+    </div></div>`;
+}
+
 function activityPage(view) {
   view.innerHTML = `${pageBand('Activity', { sub: 'Every extraction, review, acceptance and payment, most recent first.' })}
     <div class="content"><section class="card">${activityList(allActivity(), 300)}</section></div>`;
@@ -166,7 +232,7 @@ export async function route() {
       root.innerHTML = shell('Projects');
       return renderProject(document.getElementById('view'), projectMatch[1]);
     }
-    const pages = { '#/': ['Overview', overview], '#/projects': ['Projects', projectsPage], '#/invoices': ['Invoices', invoicesPage], '#/activity': ['Activity', activityPage], '#/new': ['Projects', renderNewProject] };
+    const pages = { '#/': ['Overview', overview], '#/projects': ['Projects', projectsPage], '#/invoices': ['Invoices', invoicesPage], '#/activity': ['Activity', activityPage], '#/new': ['Projects', renderNewProject], '#/settings': ['', settingsPage] };
     const [label, render] = pages[hash] || pages['#/'];
     root.innerHTML = shell(label);
     await render(document.getElementById('view'));
@@ -176,16 +242,79 @@ export async function route() {
   }
 }
 
+function closeMenus() {
+  document.querySelectorAll('.menu').forEach((m) => (m.hidden = true));
+  document.querySelectorAll('[data-action="menu"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+}
+
 document.addEventListener('click', async (e) => {
-  if (e.target.closest('[data-action="reset"]')) {
-    if (!confirm('Reset this workspace to the sample project? Your demo data will be removed.')) return;
+  const action = e.target.closest('[data-action]')?.dataset.action;
+  if (action !== 'menu' && !e.target.closest('.menu')) closeMenus();
+  if (action === 'menu') {
+    const menu = e.target.closest('.menu-wrap').querySelector('.menu');
+    const open = menu.hidden;
+    closeMenus();
+    menu.hidden = !open;
+    e.target.closest('[data-action]').setAttribute('aria-expanded', String(open));
+    if (open) menu.querySelector('a, button')?.focus();
+  }
+  if (action === 'reset') {
+    closeMenus();
+    if (!confirm('Reset the demo to the sample project? Your demo changes will be removed.')) return;
     await api.post('/api/workspace/reset');
-    toast('Workspace reset to the sample project.');
+    toast('Demo reset to the sample project.');
     location.hash = '#/';
     route();
+  }
+  if (action === 'signout') {
+    await api.post('/api/auth/signout');
+    location.assign('/');
+  }
+  if (action === 'add-sample') {
+    const button = e.target.closest('button');
+    button.disabled = true;
+    try {
+      const project = await api.post('/api/workspace/sample');
+      location.hash = `#/projects/${project.id}`;
+    } catch (error) {
+      toast(error.message, 'error');
+      button.disabled = false;
+    }
+  }
+});
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
+
+document.addEventListener('submit', async (e) => {
+  const form = e.target.closest('[data-form]');
+  if (!form) return;
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(form));
+  const button = form.querySelector('button[type=submit]');
+  button.disabled = true;
+  try {
+    if (form.dataset.form === 'profile') {
+      const { user } = await api.post('/api/account', body);
+      app.session = await api.get('/api/session');
+      toast(`Profile saved. Clients now see ${user.businessName}.`);
+      route();
+    } else if (form.dataset.form === 'password') {
+      await api.post('/api/account/password', body);
+      form.reset();
+      toast('Password changed.');
+    } else if (form.dataset.form === 'delete') {
+      if (!confirm('Delete your account and all of its projects? This cannot be undone.')) return;
+      await api.post('/api/account/delete', body);
+      location.assign('/');
+    }
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    if (button.isConnected) button.disabled = false;
   }
 });
 
 window.addEventListener('hashchange', route);
 app.session = await api.get('/api/session');
-route();
+if (!app.session.user && !app.session.demo) location.replace('/signin?next=/app');
+else route();
