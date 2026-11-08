@@ -3,23 +3,24 @@
 
 import { api, fetchSample } from '../api.js';
 import { app } from '../state.js';
-import { esc, icon, money, clauseChip, toast, busy, readFileBase64, agreementHtml, flashQuote } from '../ui.js';
+import { esc, icon, money, clauseChip, toast, busy, readFileBase64, agreementHtml, flashQuote, pageBand } from '../ui.js';
 
 export async function renderNewProject(view) {
   const state = { step: 1, file: null, draft: null, client: { name: '', email: app.session.defaults.clientEmail || '' } };
 
   function draw() {
     view.innerHTML = `
-      <div class="page-head"><div><div class="eyebrow">New project</div><h1>Start from the agreement</h1>
-        <p class="sub">Upload the signed agreement. AI extracts milestones and acceptance conditions, each linked to its clause.</p></div></div>
-      <div class="steps"><span class="${state.step === 1 ? 'on' : ''}">1. Agreement</span>›<span class="${state.step === 2 ? 'on' : ''}">2. Review extracted terms</span>›<span>3. Collect evidence</span></div>
-      ${state.step === 1 ? stepOne() : stepTwo()}`;
+      ${pageBand('New project', { crumbs: [['Overview', '#/'], ['Projects', '#/projects']], sub: 'Upload the signed agreement. AI extracts milestones and acceptance conditions, each linked to its clause.' })}
+      <div class="content">
+      <ol class="steps" aria-label="Progress" style="list-style:none;padding:0;margin:0 0 18px"><li class="${state.step === 1 ? 'on' : ''}">1. Agreement</li><li aria-hidden="true">›</li><li class="${state.step === 2 ? 'on' : ''}">2. Review extracted terms</li><li aria-hidden="true">›</li><li>3. Collect evidence</li></ol>
+      ${state.step === 1 ? stepOne() : stepTwo()}
+      </div>`;
   }
 
   function stepOne() {
     const ai = app.session.capabilities.ai;
     return `<div class="grid-2"><section class="card card-body" style="display:grid;gap:16px">
-        <label class="dropzone" data-drop>${icon('upload')}<br><b>${state.file ? esc(state.file.name) : 'Choose the agreement'}</b><br>PDF, DOCX, TXT or MD · up to 6 MB
+        <label class="dropzone" data-drop>${icon('upload')}<br><b>${state.file ? esc(state.file.name) : 'Choose the agreement'}</b><br>PDF, DOCX, TXT or MD, up to 6 MB
           <input type="file" id="agreement-input" class="sr-only" accept=".pdf,.docx,.txt,.md"></label>
         <div class="sample-files">No agreement handy? <button class="btn small" data-action="sample">${icon('file')} Use the sample website agreement</button></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -66,7 +67,7 @@ export async function renderNewProject(view) {
       <div class="actions" style="justify-content:space-between"><button class="btn" data-action="back">← Back</button>
         <button class="btn primary" data-action="confirm">${icon('check')} Confirm terms and create project</button></div>
     </div>
-    <section class="card" style="position:sticky;top:88px"><div class="card-head"><h2>Agreement</h2><span class="sub" style="margin:0">${esc(agreement.filename)}</span></div>
+    <section class="card" style="position:sticky;top:20px"><div class="card-head"><h2>Agreement</h2><span class="sub" style="margin:0">${esc(agreement.filename)}</span></div>
       <div class="agreement" id="agreement-text" style="max-height:70vh">${agreementHtml(agreement.text, sources)}</div></section></div>`;
   }
 

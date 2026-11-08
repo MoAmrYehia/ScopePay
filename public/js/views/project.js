@@ -5,7 +5,7 @@ import { api, fetchSample } from '../api.js';
 import { app } from '../state.js';
 import {
   esc, money, date, ago, icon, VERDICT, milestoneChip, invoiceChip, modeChip, clauseChip,
-  toast, openModal, closeModal, busy, agreementHtml, flashQuote, readFileBase64,
+  toast, openModal, closeModal, busy, agreementHtml, flashQuote, readFileBase64, pageBand,
 } from '../ui.js';
 
 const SAMPLE_AGREEMENT = 'agreement-website-redesign.md';
@@ -44,15 +44,16 @@ export async function renderProject(view, id) {
     const scopeInput = view.querySelector('#scope-message');
     if (scopeInput) state.scopeDraft = scopeInput.value;
     const m = p.terms.milestones.find((x) => x.id === state.milestoneId);
+    const received = p.invoices.filter((i) => ['PAID', 'MARKED_AS_PAID'].includes(i.status)).reduce((n, i) => n + i.amount, 0);
     view.innerHTML = `
-      <div class="page-head">
-        <div><div class="eyebrow">${esc(p.client.name)} · ${money(p.terms.total, p.currency)}</div><h1>${esc(p.name)}</h1>
-          <p class="sub">Invoices go to ${esc(p.client.email)} · Agreement ${esc(p.agreement.filename)} · ${extractionNote(p)}</p></div>
-        <div class="actions"><a class="btn" href="${esc(p.portalUrl)}" target="_blank" rel="noopener">${icon('external')} Client view</a>
-          <button class="btn" data-action="copy-link">${icon('link')} Copy client link</button></div>
-      </div>
+      ${pageBand(p.name, {
+        crumbs: [['Overview', '#/'], ['Projects', '#/projects']],
+        sub: `<span class="facts"><span>Client <b>${esc(p.client.name)}</b></span><span>Contract value <b>${money(p.terms.total, p.currency)}</b></span><span>Received <b>${money(received, p.currency)}</b></span><span>Invoices to <b>${esc(p.client.email)}</b></span></span>`,
+        actions: `<button class="btn" data-action="copy-link">${icon('link')} Copy client link</button><a class="btn primary" href="${esc(p.portalUrl)}" target="_blank" rel="noopener">${icon('external')} Client view</a>`,
+      })}
+      <div class="content">
       ${p.extraction.warnings?.length ? `<div class="callout amber" style="margin:0 0 18px">${icon('alert')}<span>${p.extraction.warnings.map(esc).join(' ')}</span></div>` : ''}
-      <div class="milestones" role="tablist">${p.terms.milestones.map((x) => msTab(p, x)).join('')}</div>
+      <section class="card tracker" role="tablist" aria-label="Milestones">${p.terms.milestones.map((x) => msTab(p, x)).join('')}</section>
       <div class="grid-2">
         <section class="card" aria-label="Acceptance checklist">${milestonePanel(p, m)}</section>
         <div class="stack">${invoiceCard(p, m)}${evidenceCard(p, m)}</div>
@@ -60,7 +61,9 @@ export async function renderProject(view, id) {
       <section class="card" style="margin-top:20px">
         <div class="tabs" role="tablist">${[['scope', 'Scope checks'], ['agreement', 'Agreement'], ['activity', 'Activity']].map(([k, l]) => `<button role="tab" data-tab="${k}" class="${state.tab === k ? 'active' : ''}">${l}</button>`).join('')}</div>
         <div id="tab-body">${state.tab === 'scope' ? scopeTab(p) : state.tab === 'agreement' ? agreementTab(p) : activityTab(p)}</div>
-      </section>`;
+      </section>
+      <p class="sub" style="margin-top:14px">Agreement ${esc(p.agreement.filename)}, ${extractionNote(p)}.</p>
+      </div>`;
     const input = view.querySelector('#scope-message');
     if (input) input.value = state.scopeDraft;
     window.scrollTo(0, scroll);
@@ -75,10 +78,11 @@ export async function renderProject(view, id) {
   function msTab(p, m) {
     const review = p.reviews[m.id];
     const counts = review ? `${review.counts.met}/${m.deliverables.length} met` : `${m.deliverables.length} criteria`;
-    return `<button class="ms-tab ${m.id === state.milestoneId ? 'active' : ''}" role="tab" data-ms="${m.id}">
-      <span class="eyebrow">Milestone ${m.index}</span><span class="ms-name">${esc(m.name)}</span>
-      <span class="ms-meta"><span>${money(m.amount, p.currency)} · due ${date(m.dueDate)}</span>${milestoneChip(m.status)}</span>
-      <span class="ms-meta"><span>${counts}</span></span></button>`;
+    const done = m.status === 'paid';
+    return `<button class="ms-tab ${m.id === state.milestoneId ? 'active' : ''}" role="tab" aria-selected="${m.id === state.milestoneId}" data-ms="${m.id}">
+      <span class="num ${done ? 'done' : ''}">${done ? icon('check') : m.index}</span><span class="ms-name">${esc(m.name)}</span>
+      <span class="ms-meta"><span class="ms-amount">${money(m.amount, p.currency)}</span><span>Due ${date(m.dueDate)}</span></span>
+      <span class="ms-meta">${milestoneChip(m.status)}<span>${counts}</span></span></button>`;
   }
 
   function milestonePanel(p, m) {
@@ -92,7 +96,7 @@ export async function renderProject(view, id) {
     const reviewBar = review
       ? `<div class="review-bar"><div class="counts"><span class="ai-mark">${icon('spark')} ${review.by === 'ai' ? 'AI evidence review' : 'Rule-based check (demo)'}</span>
           <span class="chip green">${review.counts.met} met</span>${review.counts.partial ? `<span class="chip amber">${review.counts.partial} partial</span>` : ''}${review.counts.missing ? `<span class="chip red">${review.counts.missing} missing</span>` : ''}
-          <span style="color:var(--muted)">· ${esc(review.model)} · ${ago(review.at)}</span></div>
+          <span class="review-meta">${esc(review.model)}, ${ago(review.at)}</span></div>
           ${!locked ? `<button class="btn small" data-action="review">${icon('refresh')} Re-run</button>` : ''}</div>
           ${!current && !locked ? `<div class="callout amber" style="margin:12px 22px 0">${icon('alert')} Evidence changed since this review. Re-run it before sharing with the client.</div>` : ''}
           ${review.summary ? `<p class="sub" style="padding:12px 22px 0;margin:0">${esc(review.summary)}</p>` : ''}`
@@ -108,14 +112,14 @@ export async function renderProject(view, id) {
         <div><div class="d-title">${esc(d.title)} ${clauseChip(d.source)} ${r ? `<span class="chip ${v.chip}">${v.label}</span>` : ''}</div>
           <div class="d-criterion">${esc(d.criterion)}</div>
           ${r?.reason ? `<div class="d-reason ${r.status}">${esc(r.reason)}${r.missingElements?.length && r.status !== 'met' ? `<br><b>Missing:</b> ${r.missingElements.map(esc).join('; ')}` : ''}</div>` : ''}
-          ${r?.evidenceIds?.length ? `<div class="d-evidence">${r.evidenceIds.map((eid) => `<button class="ev-ref" data-evidence="${eid}">${label(eid)} · ${esc(evidence.find((e) => e.id === eid)?.filename || 'removed')}</button>`).join('')}</div>` : ''}
+          ${r?.evidenceIds?.length ? `<div class="d-evidence">${r.evidenceIds.map((eid) => `<button class="ev-ref" data-evidence="${eid}">${label(eid)} ${esc(evidence.find((e) => e.id === eid)?.filename || 'removed')}</button>`).join('')}</div>` : ''}
         </div></div>`;
     }).join('');
 
-    return `<div class="card-head"><div><h2>Acceptance checklist</h2><p class="sub" style="margin-top:3px">Milestone ${m.index}: ${esc(m.name)} · ${money(m.amount, p.currency)}</p></div>${milestoneChip(m.status)}</div>
+    return `<div class="card-head"><div><h2>Acceptance checklist</h2><p class="sub" style="margin-top:3px">Milestone ${m.index}, ${esc(m.name)}, ${money(m.amount, p.currency)}</p></div>${milestoneChip(m.status)}</div>
       ${locked && !review ? '' : reviewBar}
       <div>${rows}</div>
-      <div class="decision" style="border-radius:0 0 12px 12px">${milestoneFooter(p, m, review, current)}</div>`;
+      <div class="decision">${milestoneFooter(p, m, review, current)}</div>`;
   }
 
   function milestoneFooter(p, m, review, current) {
@@ -145,7 +149,7 @@ export async function renderProject(view, id) {
     const showSamples = editable && p.agreement.filename === SAMPLE_AGREEMENT && m.index === 2;
     return `<section class="card"><div class="card-head"><h2>Evidence</h2><span class="sub" style="margin:0">${evidence.length} file(s)</span></div>
       <div class="card-body">
-        ${editable ? `<label class="dropzone" data-drop>${icon('upload')}<br><b>Add screenshots or documents</b><br>PNG, JPG, PDF, DOCX · up to 6 MB
+        ${editable ? `<label class="dropzone" data-drop>${icon('upload')}<br><b>Add screenshots or documents</b><br>PNG, JPG, PDF or DOCX, up to 6 MB each
           <input type="file" id="evidence-input" class="sr-only" multiple accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.txt,.md"></label>` : ''}
         ${showSamples ? `<div class="sample-files">Demo files: ${SAMPLE_FILES.map(([f, l]) => `<button class="btn small" data-sample="${f}">${icon('plus')} ${l}</button>`).join('')}</div>` : ''}
         <div class="thumbs">${evidence.map((e, i) => `<div class="thumb"><span class="label">E${i + 1}</span>
@@ -158,8 +162,9 @@ export async function renderProject(view, id) {
   function invoiceCard(p, m) {
     const invoice = p.invoices.find((i) => i.kind === 'milestone' && i.targetId === m.id);
     if (!invoice) {
-      return `<section class="card card-body"><div style="display:flex;gap:10px;align-items:flex-start">${icon('wallet')}<div><h3>PayPal invoice</h3>
-        <p class="sub">Created automatically when ${esc(p.client.name)} accepts this milestone (agreement §6.2). Amount: ${money(m.amount, p.currency)}.</p></div></div></section>`;
+      return `<section class="card"><div class="card-head"><h2>PayPal invoice</h2><span class="chip grey">Not issued</span></div>
+        <div class="card-body"><div class="statement"><div class="total"><span class="what">${esc(m.name)}<small>Issued when ${esc(p.client.name)} accepts</small></span><span class="amount">${money(m.amount, p.currency)}</span></div>
+        <p class="sub" style="margin:8px 0 0">Under §6.2 of the agreement, the client's written acceptance triggers this invoice. You send it through PayPal.</p></div></div></section>`;
     }
     return `<section class="card"><div class="card-head"><h2>PayPal invoice</h2>${invoiceChip(invoice.status)}</div><div class="card-body">${invoiceBody(p, invoice)}</div></section>`;
   }
@@ -174,9 +179,16 @@ export async function renderProject(view, id) {
       actions.push(`<button class="btn" data-inv="remind" data-id="${invoice.id}">${icon('bell')} Draft reminder</button>`);
       if (invoice.mode === 'simulated') actions.push(`<button class="btn" data-inv="simulate" data-id="${invoice.id}">Simulate payment</button>`);
     }
-    return `<div class="invoice-box">
-      <div class="inv-line"><span><b>${esc(invoice.number || 'Pending number')}</b><br><span class="sub">${esc(invoice.title)}</span></span><span class="amount">${money(invoice.amount, p.currency)}</span></div>
-      <div class="inv-line"><span class="sub" style="margin:0">Approved by ${esc(invoice.approvedBy)}, ${date(invoice.approvedAt)}</span>${modeChip(invoice.mode)}</div>
+    const rows = [
+      ['Invoice number', esc(invoice.number || 'Pending')],
+      ['Billed to', esc(p.client.email)],
+      ['Accepted by', `${esc(invoice.approvedBy)}, ${date(invoice.approvedAt)}`],
+      ['Sent', invoice.sentAt ? date(invoice.sentAt) : 'Not yet'],
+      ['Channel', modeChip(invoice.mode)],
+    ];
+    return `<div class="statement">
+      <div class="total"><span class="what">${esc(invoice.title)}<small>${invoice.kind === 'milestone' ? 'Milestone payment' : 'Approved change request'}</small></span><span class="amount">${money(invoice.amount, p.currency)}</span></div>
+      ${rows.map(([k, v]) => `<div class="row"><span>${k}</span><span>${v}</span></div>`).join('')}
       ${invoice.error ? `<div class="callout red" style="margin:0">${icon('alert')}${esc(invoice.error)}</div>` : ''}
       ${invoice.paidAt ? `<div class="callout green" style="margin:0">${icon('check')} Paid ${date(invoice.paidAt)}</div>` : ''}
       ${invoice.reminders?.length ? `<div class="sub" style="margin:0">${invoice.reminders.length} reminder(s) sent, last ${ago(invoice.reminders.at(-1).at)}</div>` : ''}
@@ -186,7 +198,7 @@ export async function renderProject(view, id) {
 
   function scopeTab(p) {
     const examples = ['Can you also add a blog where we post studio news?', 'Please make sure the contact page shows our office address.', 'Could you write the copy for the About page too?'];
-    return `<div class="card-body" style="border-bottom:1px solid var(--border);display:grid;gap:10px">
+    return `<div class="card-body" style="border-bottom:1px solid var(--line);display:grid;gap:10px">
         <label class="field" for="scope-message">Paste a client request. AI checks it against the agreement and drafts a change order when it is extra work.</label>
         <textarea id="scope-message" placeholder="e.g. “Could you also add an online shop?”"></textarea>
         <div class="actions" style="justify-content:space-between"><div class="actions">${examples.map((x) => `<button class="btn small" data-example="${esc(x)}">${esc(x.length > 42 ? x.slice(0, 40) + '…' : x)}</button>`).join('')}</div>
@@ -201,16 +213,16 @@ export async function renderProject(view, id) {
     let orderHtml = '';
     if (order) {
       const statusChip = { draft: 'grey', sent: 'blue', approved: 'green', declined: 'red', invoiced: 'blue', paid: 'green' }[order.status];
-      orderHtml = `<div class="co"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><b>Change order: ${esc(order.title)}</b><span class="chip ${statusChip}">${esc(order.status)}</span></div>
+      orderHtml = `<div class="co"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h3>Change order: ${esc(order.title)}</h3><span class="chip ${statusChip}">${esc(order.status)}</span></div>
         <div class="sub" style="margin:0">${esc(order.description)}</div>
         ${order.status === 'draft' ? `<div class="co-grid"><span class="sub" style="margin:0">Rate from §${esc(p.terms.changePolicy?.source?.clauseRef || '?')}: ${order.rate ? money(order.rate, p.currency) + '/h' : 'not set'}</span>
           <label class="field">Hours<input type="number" min="0.5" step="0.5" value="${order.hours}" data-co-hours="${c.id}"></label>
           <label class="field">Price<input type="number" min="1" step="1" value="${order.amount ?? ''}" data-co-amount="${c.id}"></label></div>
           <div class="actions"><button class="btn primary" data-action="send-co" data-id="${c.id}">${icon('send')} Send to client for approval</button></div>`
         : `<div class="inv-line"><span class="sub" style="margin:0">${order.hours} h${order.rate ? ` × ${money(order.rate, p.currency)}` : ''}</span><b>${money(order.amount, p.currency)}</b></div>`}
-        ${invoice ? `<div style="border-top:1px solid var(--border);padding-top:10px"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><b>PayPal invoice</b>${invoiceChip(invoice.status)}</div>${invoiceBody(p, invoice)}</div>` : ''}</div>`;
+        ${invoice ? `<div style="border-top:1px solid var(--line);padding-top:10px"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><b>PayPal invoice</b>${invoiceChip(invoice.status)}</div>${invoiceBody(p, invoice)}</div>` : ''}</div>`;
     }
-    return `<div class="scope-item"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip ${v[1]}">${v[0]}</span>${clauseChip(c.source)}<span class="sub" style="margin:0">${c.by === 'ai' ? 'AI check' : 'demo rules'} · ${ago(c.at)}</span></div>
+    return `<div class="scope-item"><div class="scope-meta"><span class="chip ${v[1]}">${v[0]}</span>${clauseChip(c.source)}<span>${c.by === 'ai' ? 'Checked by AI' : 'Checked by demo rules'}, ${ago(c.at)}</span></div>
       <q>${esc(c.message)}</q><div>${esc(c.reason)}</div>${orderHtml}</div>`;
   }
 
@@ -220,7 +232,7 @@ export async function renderProject(view, id) {
   }
 
   function activityTab(p) {
-    return `<ul class="activity">${p.activity.map((a) => `<li><span class="ico">${icon('pulse')}</span><div>${esc(a.text)}<time>${ago(a.at)} · ${new Date(a.at).toLocaleString()}</time></div></li>`).join('')}</ul>`;
+    return `<ul class="activity">${p.activity.map((a) => `<li><div class="when"><b>${new Date(a.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</b>${new Date(a.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div><div class="what">${esc(a.text)}</div></li>`).join('')}</ul>`;
   }
 
   // ---------- polling (client decisions, PayPal payments) ------------------------------

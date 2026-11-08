@@ -4,7 +4,13 @@ export const esc = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 export const money = (n, currency = 'USD') =>
-  n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: n % 1 ? 2 : 0 }).format(n);
+  n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+/** Statement-style figure: large whole part, raised cents, currency code. */
+export function balance(n, currency = 'USD') {
+  const [whole, cents] = money(n, currency).split('.');
+  return `<span class="whole">${esc(whole)}</span><span class="cents">.${esc(cents || '00')}</span><span class="ccy">${esc(currency)}</span>`;
+}
 
 export const date = (iso) => (iso ? new Date(iso.length === 10 ? iso + 'T12:00:00' : iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
 
@@ -64,7 +70,7 @@ export const milestoneChip = (status) => {
 
 export function invoiceChip(status) {
   const map = { DRAFT: 'grey', SENT: 'blue', UNPAID: 'blue', SCHEDULED: 'blue', PAYMENT_PENDING: 'amber', PARTIALLY_PAID: 'amber', PAID: 'green', MARKED_AS_PAID: 'green', CANCELLED: 'red', CREATE_FAILED: 'red', CREATING: 'grey' };
-  const label = { UNPAID: 'Sent · unpaid', CREATE_FAILED: 'Not created', MARKED_AS_PAID: 'Paid' }[status] || status.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
+  const label = { UNPAID: 'Unpaid', CREATE_FAILED: 'Not created', MARKED_AS_PAID: 'Paid' }[status] || status.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
   return `<span class="chip ${map[status] || 'grey'}">${esc(label)}</span>`;
 }
 
@@ -75,7 +81,7 @@ export function clauseChip(source, attrs = '') {
   if (!source?.clauseRef && !source?.quote) return '';
   const unverified = source.quote && !source.verified;
   const title = unverified ? 'Quote not found verbatim in the agreement. Check it.' : source.quote;
-  return `<button type="button" class="clause ${unverified ? 'unverified' : ''}" title="${esc(title)}" data-quote="${esc(source.quote)}" ${attrs}>${icon('file')}§${esc(source.clauseRef || '?')}${unverified ? ' · check' : ''}</button>`;
+  return `<button type="button" class="clause ${unverified ? 'unverified' : ''}" title="${esc(title)}" data-quote="${esc(source.quote)}" ${attrs}>${icon('file')}§${esc(source.clauseRef || '?')}${unverified ? ', check' : ''}</button>`;
 }
 
 export function toast(message, kind = '') {
@@ -161,4 +167,10 @@ export function readFileBase64(file) {
     reader.onerror = () => reject(new Error('Could not read the file.'));
     reader.readAsDataURL(file);
   });
+}
+
+/** White title band under the navigation, shared by every page. */
+export function pageBand(title, { crumbs = [], sub = '', actions = '' } = {}) {
+  const trail = crumbs.length ? `<div class="crumbs">${crumbs.map(([label, href]) => `<a href="${href}">${esc(label)}</a>`).join('<span class="sep">/</span>')}</div>` : '';
+  return `<div class="page-band"><div class="inner"><div>${trail}<h1>${esc(title)}</h1>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${actions ? `<div class="actions">${actions}</div>` : ''}</div></div>`;
 }

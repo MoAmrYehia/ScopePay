@@ -1,79 +1,86 @@
 // Freelancer workspace: shell, hash router, overview, invoices and activity pages.
 
 import { api } from './api.js';
-import { esc, money, date, ago, icon, milestoneChip, invoiceChip, modeChip, toast } from './ui.js';
+import { esc, money, balance, date, icon, invoiceChip, modeChip, toast, pageBand } from './ui.js';
 import { renderProject } from './views/project.js';
 import { renderNewProject } from './views/new-project.js';
 import { app } from './state.js';
 
 const NAV = [
-  ['#/', 'Overview', 'grid'],
-  ['#/projects', 'Projects', 'folder'],
-  ['#/invoices', 'Invoices', 'wallet'],
-  ['#/activity', 'Activity', 'pulse'],
+  ['#/', 'Overview'],
+  ['#/projects', 'Projects'],
+  ['#/invoices', 'Invoices'],
+  ['#/activity', 'Activity'],
 ];
 
-function shell(active, crumbs) {
+function shell(active) {
   const caps = app.session.capabilities;
-  const ai = caps.ai.live ? `${caps.ai.provider === 'anthropic' ? 'Claude' : 'OpenAI'} · ${caps.ai.model}` : 'Demo rules (no AI key)';
-  const pay = caps.payments.live ? `Invoicing v2 sandbox${caps.payments.webhooks ? ' + webhooks' : ''}` : 'Simulated (no sandbox keys)';
-  return `<div class="shell">
-    <aside class="sidebar">
-      <a class="logo" href="#/"><span class="logo-mark">s</span><span>scopepay<span class="dot">.</span></span></a>
-      <nav class="main-nav" aria-label="Main">${NAV.map(([href, label, ico]) => `<a href="${href}" class="${active === label ? 'active' : ''}">${icon(ico)}<span>${label}</span>${label === 'Projects' ? `<span class="nav-count">${app.projects.length}</span>` : ''}</a>`).join('')}</nav>
-      <div class="sidebar-foot">
-        <div class="integrations"><b>Integrations</b>
-          <div class="integration"><span class="led ${caps.ai.live ? 'live' : ''}"></span><div>AI review<small>${esc(ai)}</small></div></div>
-          <div class="integration"><span class="led ${caps.payments.live ? 'live' : ''}"></span><div>PayPal<small>${esc(pay)}</small></div></div>
-        </div>
-        <button class="reset" data-action="reset">↺ Reset demo workspace</button>
+  const ai = caps.ai.live ? `AI review: ${caps.ai.provider === 'anthropic' ? 'Claude' : 'OpenAI'}` : 'AI review: demo rules';
+  const pay = caps.payments.live ? `PayPal sandbox${caps.payments.webhooks ? ' with webhooks' : ''}` : 'PayPal: simulated';
+  const demo = !caps.ai.live || !caps.payments.live;
+  return `
+    <header class="topnav"><div class="inner">
+      <a class="logo" href="#/" aria-label="ScopePay overview"><span class="logo-mark">S</span>ScopePay</a>
+      <nav class="main-nav" aria-label="Main">${NAV.map(([href, label]) => `<a href="${href}" class="${active === label ? 'active' : ''}" ${active === label ? 'aria-current="page"' : ''}>${label}${label === 'Projects' ? `<span class="nav-count">${app.projects.length}</span>` : ''}</a>`).join('')}</nav>
+      <div class="nav-right">
+        <span class="status-item"><span class="led ${caps.ai.live ? 'live' : ''}"></span>${esc(ai)}</span>
+        <span class="status-item"><span class="led ${caps.payments.live ? 'live' : ''}"></span>${esc(pay)}</span>
+        <span class="avatar" title="Jamie Lee Studio">JL</span>
       </div>
-    </aside>
-    <main>
-      <div class="topbar"><div class="crumbs">${crumbs}</div>
-        <span class="pill ${caps.payments.live ? 'live' : 'demo'}">${icon('shield')}${caps.payments.live ? 'PayPal sandbox connected' : 'Demo mode: simulated payments'}</span></div>
-      <div class="content" id="view"></div>
-    </main></div>`;
+    </div></header>
+    ${demo ? `<div class="mode-banner"><div class="inner">${icon('alert')}<span>Demo mode. ${!caps.payments.live ? 'Invoices are simulated, no money moves. ' : ''}${!caps.ai.live ? 'Evidence checks use file names instead of AI. ' : ''}Add API keys to use the live services.</span></div></div>` : ''}
+    <main id="view"></main>
+    <div class="footer-note"><span>Payments are processed by PayPal. ScopePay never stores card or bank details.</span><button class="reset" data-action="reset">Reset demo workspace</button></div>`;
 }
-
-const crumb = (...parts) => parts.map((p, i) => (i === parts.length - 1 ? `<span class="here">${esc(p)}</span>` : `<a href="#/">${esc(p)}</a>`)).join('<span class="sep">/</span>');
 
 // --- derived numbers --------------------------------------------------------------
 
 const allInvoices = () => app.projects.flatMap((p) => p.invoices.map((i) => ({ ...i, project: p })));
 const isPaid = (i) => ['PAID', 'MARKED_AS_PAID'].includes(i.status);
-const isOpen = (i) => ['SENT', 'UNPAID', 'PARTIALLY_PAID', 'PAYMENT_PENDING', 'DRAFT'].includes(i.status);
+const isOutstanding = (i) => ['SENT', 'UNPAID', 'PARTIALLY_PAID', 'PAYMENT_PENDING'].includes(i.status);
+const sum = (list) => list.reduce((n, i) => n + i.amount, 0);
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-function projectAttention(p) {
-  const notes = [];
+function nextStep(p) {
+  for (const i of p.invoices) if (i.status === 'DRAFT') return ['green', `${i.title} approved. Invoice ready to send.`];
   for (const m of p.terms.milestones) {
     const review = p.reviews[m.id];
-    if (m.status === 'changes_requested') notes.push(['amber', `${p.client.name} requested changes on ${m.name}.`]);
-    else if (review && ['in_progress'].includes(m.status) && review.counts.missing + review.counts.partial) notes.push(['amber', `${m.name}: ${review.counts.missing} missing and ${review.counts.partial} partial deliverable(s).`]);
-    else if (m.status === 'submitted') notes.push(['blue', `${m.name} is awaiting the client's acceptance.`]);
+    if (m.status === 'changes_requested') return ['amber', `${p.client.name} asked for changes on ${m.name}.`];
+    if (m.status === 'submitted') return ['blue', `${m.name} is waiting for the client's acceptance.`];
+    if (m.status === 'in_progress' && review && review.counts.missing + review.counts.partial) {
+      return ['amber', `${m.name}: ${review.counts.missing} missing, ${review.counts.partial} partial.`];
+    }
+    if (m.status === 'in_progress') return ['', `${m.name}: collect evidence and run the review.`];
   }
-  for (const i of p.invoices) if (i.status === 'DRAFT') notes.push(['green', `${i.title} was approved. Invoice ready to send.`]);
-  return notes[0];
+  const unpaid = p.invoices.find(isOutstanding);
+  if (unpaid) return ['blue', `${unpaid.title}: waiting for payment.`];
+  return ['green', 'All milestones paid.'];
 }
 
 function projectRow(p) {
   const ms = p.terms.milestones;
-  const paid = ms.filter((m) => m.status === 'paid').length;
-  const attention = projectAttention(p);
+  const paid = ms.filter((m) => m.status === 'paid');
+  const [tone, text] = nextStep(p);
   return `<a class="project-row" href="#/projects/${p.id}">
-    <div class="row-top"><span class="badge-icon">${icon('globe')}</span>
-      <div style="flex:1;min-width:0"><div style="display:flex;justify-content:space-between;gap:10px"><h3>${esc(p.name)}</h3><span class="chip ${paid === ms.length ? 'green' : 'grey'}">${paid}/${ms.length} paid</span></div>
-      <div class="sub" style="margin-top:2px">${esc(p.client.name)}</div></div></div>
-    <div class="meta"><span>Value <b>${money(p.terms.total, p.currency)}</b></span><span>Milestones <b>${ms.length}</b></span><span>Next due <b>${date(ms.find((m) => m.status !== 'paid')?.dueDate)}</b></span></div>
-    <div class="progress">${ms.map((m) => `<span class="${m.status === 'paid' ? 'paid' : m.status !== 'in_progress' ? 'active' : ''}"></span>`).join('')}</div>
-    ${attention ? `<div class="callout ${attention[0]}">${icon(attention[0] === 'green' ? 'check' : 'alert')}${esc(attention[1])}</div>` : ''}
+    <div><div class="name">${esc(p.name)}</div><div class="client">${esc(p.client.name)}</div></div>
+    <div class="progress-cell"><div class="progress" aria-hidden="true">${ms.map((m) => `<span class="${m.status === 'paid' ? 'paid' : m.status !== 'in_progress' ? 'active' : ''}"></span>`).join('')}</div>
+      <div class="progress-label">${paid.length} of ${ms.length} milestones paid</div></div>
+    <div class="next-cell"><div class="next ${tone}">${esc(text)}</div></div>
+    <div class="amount-col">${money(p.terms.total, p.currency)}<small>${money(sum(p.invoices.filter(isPaid)), p.currency)} received</small></div>
   </a>`;
 }
 
-function activityList(items, limit = 8) {
-  const ico = { evidence: 'upload', review: 'spark', approval: 'check', invoice: 'wallet', paid: 'wallet', scope: 'scope', agreement: 'file', error: 'alert', changes: 'alert', submit: 'send' };
-  if (!items.length) return '<div class="empty">Nothing yet.</div>';
-  return `<ul class="activity">${items.slice(0, limit).map((a) => `<li><span class="ico">${icon(ico[a.kind] || 'pulse')}</span><div>${esc(a.text)}${a.project ? ` <span style="color:var(--muted)">· ${esc(a.project)}</span>` : ''}<time datetime="${esc(a.at)}">${ago(a.at)}</time></div></li>`).join('')}</ul>`;
+const projectLedger = (projects) => `
+  <div class="ledger-head" aria-hidden="true"><span>Project</span><span>Progress</span><span>Next step</span><span style="text-align:right">Contract value</span></div>
+  ${projects.map(projectRow).join('') || '<div class="empty">No projects yet. Start one from a signed agreement.</div>'}`;
+
+function activityList(items, limit) {
+  if (!items.length) return '<div class="empty">No activity yet.</div>';
+  return `<ul class="activity">${items.slice(0, limit).map((a) => {
+    const d = new Date(a.at);
+    return `<li><div class="when"><b>${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</b>${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div>
+      <div class="what">${esc(a.text)}${a.project ? `<small>${esc(a.project)}</small>` : ''}</div></li>`;
+  }).join('')}</ul>`;
 }
 const allActivity = () => app.projects.flatMap((p) => p.activity.map((a) => ({ ...a, project: p.name }))).sort((a, b) => b.at.localeCompare(a.at));
 
@@ -81,57 +88,65 @@ const allActivity = () => app.projects.flatMap((p) => p.activity.map((a) => ({ .
 
 function overview(view) {
   const invoices = allInvoices();
-  const outstanding = invoices.filter((i) => isOpen(i) && i.status !== 'DRAFT');
-  const awaiting = app.projects.flatMap((p) => p.terms.milestones.filter((m) => m.status === 'submitted')).length;
-  const paid = invoices.filter(isPaid).reduce((n, i) => n + i.amount, 0);
+  const collected = invoices.filter(isPaid);
+  const outstanding = invoices.filter(isOutstanding);
+  const drafts = invoices.filter((i) => i.status === 'DRAFT');
+  const awaiting = app.projects.flatMap((p) => p.terms.milestones.filter((m) => m.status === 'submitted').map((m) => ({ ...m, currency: p.currency })));
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   view.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Agreed · Delivered · Approved · Paid</div><h1>Good to see you, Jamie</h1><p class="sub">Every milestone backed by evidence your client can check.</p></div>
-      <a class="btn primary" href="#/new">${icon('plus')} New project</a></div>
-    <div class="stats">
-      ${stat('Active projects', app.projects.filter((p) => p.terms.milestones.some((m) => m.status !== 'paid')).length, 'folder', 'Across your workspace')}
-      ${stat('Awaiting client', awaiting, 'send', 'Milestones shared for acceptance')}
-      ${stat('Outstanding', money(outstanding.reduce((n, i) => n + i.amount, 0)), 'file', `${outstanding.length} invoice(s) sent via PayPal`)}
-      ${stat('Collected', money(paid), 'wallet', 'Paid invoices, incl. sample history')}
-    </div>
-    <div class="grid-2">
-      <section class="card"><div class="card-head"><h2>Your projects</h2><a class="btn small" href="#/new">${icon('plus')} New</a></div>${app.projects.map(projectRow).join('') || '<div class="empty">No projects yet.</div>'}</section>
-      <div class="stack">
-        <section class="card"><div class="card-head"><h2>Recent activity</h2></div>${activityList(allActivity(), 7)}</section>
-        <section class="card card-body" style="background:#eef4ef;border-color:#dce9df">
-          <div class="eyebrow" style="color:#4c7a5e">${icon('spark')} How ScopePay works</div>
-          <ol style="padding-left:18px;margin:12px 0 0;font-size:13px;color:#3f5a4b;display:grid;gap:6px">
-            <li>AI turns the agreement into milestones and acceptance criteria, each citing its clause.</li>
-            <li>AI checks delivered screenshots and files against every criterion.</li>
-            <li>The client reviews the evidence and accepts. Humans decide.</li>
-            <li>Acceptance creates a PayPal invoice; payment updates the milestone.</li>
-          </ol></section>
+    ${pageBand(`${greeting}, Jamie`, { sub: 'Jamie Lee Studio, freelancer account', actions: `<a class="btn primary" href="#/new">${icon('plus')} New project</a>` })}
+    <div class="content">
+      <section class="card summary" aria-label="Account summary">
+        <div><div class="label">Collected to date</div>
+          <div class="balance">${balance(sum(collected))}</div>
+          <div class="note">${plural(collected.length, 'paid invoice')} across ${plural(app.projects.length, 'project')}</div>
+          <div class="actions"><a class="btn small" href="#/invoices">View invoices</a><a class="btn small" href="#/activity">Statement of activity</a></div></div>
+        <div><div class="label">Outstanding</div><div class="figure">${money(sum(outstanding))}</div><div class="note">${plural(outstanding.length, 'invoice')} sent, not yet paid</div></div>
+        <div><div class="label">Awaiting acceptance</div><div class="figure">${money(sum(awaiting))}</div><div class="note">${plural(awaiting.length, 'milestone')} with your clients</div></div>
+        <div><div class="label">Ready to invoice</div><div class="figure">${money(sum(drafts))}</div><div class="note">${plural(drafts.length, 'approved invoice')} to send</div></div>
+      </section>
+      <div class="grid-2">
+        <section class="card"><div class="card-head"><h2>Your projects</h2><a class="btn small" href="#/projects">All projects</a></div>${projectLedger(app.projects)}</section>
+        <div class="stack">
+          <section class="card"><div class="card-head"><h2>Recent activity</h2><a href="#/activity" style="font-size:13px">See all</a></div>${activityList(allActivity(), 6)}</section>
+          <section class="card"><div class="card-head"><h2>How payments are released</h2></div>
+            <ol class="steps-list">
+              <li>AI turns the agreement into milestones and acceptance conditions, each citing its clause.</li>
+              <li>AI checks delivered screenshots and files against every condition.</li>
+              <li>Your client reviews the evidence and accepts. People make the decision.</li>
+              <li>Acceptance issues a PayPal invoice. Payment closes the milestone.</li>
+            </ol></section>
+        </div>
       </div>
     </div>`;
 }
 
-const stat = (label, value, ico, foot) => `<div class="card stat"><div class="stat-top">${label}${icon(ico)}</div><div class="stat-value">${value}</div><div class="stat-foot">${foot}</div></div>`;
-
 function projectsPage(view) {
-  view.innerHTML = `<div class="page-head"><div><div class="eyebrow">Workspace</div><h1>Projects</h1><p class="sub">Agreed work, clear milestones, and the evidence behind them.</p></div><a class="btn primary" href="#/new">${icon('plus')} New project</a></div>
-    <section class="card">${app.projects.map(projectRow).join('') || '<div class="empty">No projects yet.</div>'}</section>`;
+  view.innerHTML = `${pageBand('Projects', { sub: 'Agreed work, milestone by milestone, with the evidence behind each payment.', actions: `<a class="btn primary" href="#/new">${icon('plus')} New project</a>` })}
+    <div class="content"><section class="card">${projectLedger(app.projects)}</section></div>`;
 }
 
 function invoicesPage(view) {
   const invoices = allInvoices().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  view.innerHTML = `<div class="page-head"><div><div class="eyebrow">PayPal Invoicing</div><h1>Invoices</h1><p class="sub">Every invoice links back to the client approval that triggered it.</p></div></div>
-    <section class="card" style="overflow-x:auto"><table>
-      <thead><tr><th>Invoice</th><th>Project</th><th class="hide-sm">Approved by</th><th>Status</th><th class="num">Amount</th></tr></thead>
-      <tbody>${invoices.map((i) => `<tr>
-        <td><a href="#/projects/${i.project.id}">${esc(i.title)}</a><div class="sub" style="margin:2px 0 0">${esc(i.number || '—')} · ${modeChip(i.mode)}</div></td>
-        <td>${esc(i.project.name)}<div class="sub" style="margin:2px 0 0">${esc(i.project.client.name)}</div></td>
-        <td class="hide-sm">${esc(i.approvedBy)}<div class="sub" style="margin:2px 0 0">${date(i.approvedAt)}</div></td>
-        <td>${invoiceChip(i.status)}</td><td class="num">${money(i.amount, i.project.currency)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No invoices yet. They appear when a client accepts a milestone.</td></tr>'}</tbody>
-    </table></section>`;
+  const row = (i) => `<tr>
+    <td><a href="#/projects/${i.project.id}">${esc(i.title)}</a><small>No. ${esc(i.number || 'pending')}</small></td>
+    <td class="hide-sm">${esc(i.project.client.name)}<small>${esc(i.project.name)}</small></td>
+    <td class="hide-sm">${date(i.approvedAt)}<small>Accepted by ${esc(i.approvedBy)}</small></td>
+    <td class="hide-sm">${modeChip(i.mode)}</td>
+    <td>${invoiceChip(i.status)}</td>
+    <td class="num">${money(i.amount, i.project.currency)}</td></tr>`;
+  view.innerHTML = `${pageBand('Invoices', { sub: 'Every invoice is issued from a recorded client acceptance and sent through PayPal.' })}
+    <div class="content"><section class="card table-wrap"><table>
+      <thead><tr><th>Invoice</th><th class="hide-sm">Billed to</th><th class="hide-sm">Accepted</th><th class="hide-sm">Channel</th><th>Status</th><th class="num">Amount</th></tr></thead>
+      <tbody>${invoices.map(row).join('') || '<tr><td colspan="6" class="empty">No invoices yet. One is issued when a client accepts a milestone.</td></tr>'}</tbody>
+      ${invoices.length ? `<tfoot><tr><td colspan="5" class="hide-sm">Total received</td><td class="num">${money(sum(invoices.filter(isPaid)))}</td></tr></tfoot>` : ''}
+    </table></section></div>`;
 }
 
 function activityPage(view) {
-  view.innerHTML = `<div class="page-head"><div><div class="eyebrow">Audit trail</div><h1>Activity</h1><p class="sub">Every extraction, review, approval and payment, in order.</p></div></div>
-    <section class="card">${activityList(allActivity(), 200)}</section>`;
+  view.innerHTML = `${pageBand('Activity', { sub: 'Every extraction, review, acceptance and payment, most recent first.' })}
+    <div class="content"><section class="card">${activityList(allActivity(), 300)}</section></div>`;
 }
 
 // --- router --------------------------------------------------------------------------
@@ -148,16 +163,16 @@ export async function route() {
     await refreshProjects();
     const projectMatch = /^#\/projects\/([\w]+)/.exec(hash);
     if (projectMatch) {
-      const p = app.projects.find((x) => x.id === projectMatch[1]);
-      root.innerHTML = shell('Projects', crumb('Workspace', 'Projects', p?.name || 'Project'));
+      root.innerHTML = shell('Projects');
       return renderProject(document.getElementById('view'), projectMatch[1]);
     }
     const pages = { '#/': ['Overview', overview], '#/projects': ['Projects', projectsPage], '#/invoices': ['Invoices', invoicesPage], '#/activity': ['Activity', activityPage], '#/new': ['Projects', renderNewProject] };
     const [label, render] = pages[hash] || pages['#/'];
-    root.innerHTML = shell(label, crumb('Workspace', hash === '#/new' ? 'New project' : label));
+    root.innerHTML = shell(label);
     await render(document.getElementById('view'));
+    window.scrollTo(0, 0);
   } catch (error) {
-    root.innerHTML = `<div class="empty" style="padding:80px">Could not load ScopePay: ${esc(error.message)}</div>`;
+    root.innerHTML = `<div class="empty" style="padding:80px">ScopePay could not load: ${esc(error.message)}. Refresh the page to try again.</div>`;
   }
 }
 
