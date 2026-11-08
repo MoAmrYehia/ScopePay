@@ -76,6 +76,10 @@ PayPal calls go only to `api-m.sandbox.paypal.com`; production credentials are n
 
 The blueprint also creates a free Render Postgres database and connects it through `DATABASE_URL`, so accounts, projects and evidence files survive restarts. Render's free database expires after 30 days unless its plan is upgraded.
 
+## GitHub Pages
+
+The public website is also published to GitHub Pages at https://moamryehia.github.io/ScopePay/ by `.github/workflows/pages.yml` on every push to `main`. `scripts/build-static-site.mjs` exports the pages as static files; the demo, sign-in and sign-up buttons point to the app on Render, since accounts, AI and PayPal need the server.
+
 ## The website and accounts
 
 | Path | What it is |
