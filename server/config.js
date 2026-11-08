@@ -17,6 +17,7 @@ const aiProvider = pickAiProvider();
 export const config = {
   port: Number(env.PORT) || 3000,
   dataDir: env.DATA_DIR || 'data',
+  databaseUrl: env.DATABASE_URL || '',
   publicUrl: (env.PUBLIC_URL || '').replace(/\/$/, ''),
 
   ai: {

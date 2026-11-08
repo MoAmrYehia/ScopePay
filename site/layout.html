@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  <meta name="description" content="{{description}}">
+  <meta property="og:title" content="{{title}}">
+  <meta property="og:description" content="{{description}}">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#0f2747">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f2747'/%3E%3Ctext x='16' y='22.5' font-size='18' font-family='Arial' font-weight='700' fill='white' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E">
+  <link rel="preload" href="/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/ibm-plex-sans-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/site.css">
+</head>
+<body class="page-{{page}}">
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="/" aria-label="ScopePay home"><span class="brand-mark">S</span>ScopePay</a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="/how-it-works" data-nav="how-it-works">How it works</a>
+        <a href="/pricing" data-nav="pricing">Pricing</a>
+        <a href="/security" data-nav="security">Security</a>
+        <a href="/demo">Live demo</a>
+      </nav>
+      <div class="header-account">{{account}}</div>
+    </div>
+  </header>
+
+  <main id="main">
+{{content}}
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-grid">
+      <div>
+        <a class="brand" href="/"><span class="brand-mark">S</span>ScopePay</a>
+        <p class="footer-blurb">Get paid for the work you agreed to. Agreement, evidence, acceptance and PayPal invoice in one place.</p>
+      </div>
+      <nav aria-label="Product"><h2>Product</h2><a href="/how-it-works">How it works</a><a href="/pricing">Pricing</a><a href="/security">Security</a><a href="/demo">Live demo</a></nav>
+      <nav aria-label="Account"><h2>Account</h2><a href="/signup">Create account</a><a href="/signin">Sign in</a><a href="/app">Open the app</a></nav>
+      <nav aria-label="Legal"><h2>Legal</h2><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/MoAmrYehia/ScopePay">Source code</a></nav>
+    </div>
+    <div class="wrap footer-legal">
+      <p>© {{year}} ScopePay. An independent project built for the PayPal AI Hackathon. Not affiliated with or endorsed by PayPal. PayPal is a trademark of PayPal, Inc.</p>
+    </div>
+  </footer>
+</body>
+</html>

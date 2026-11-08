@@ -1,0 +1,18 @@
+<!--{"title": "Create account", "description": "Create a free ScopePay account."}-->
+<section class="auth">
+  <div class="auth-card">
+    <h1>Create your account</h1>
+    <p class="sub">Free during beta. No card required.</p>
+    <form class="auth-form" data-auth="signup" novalidate>
+      <div class="form-error" role="alert" hidden></div>
+      <label>Your name<input type="text" name="name" autocomplete="name" required></label>
+      <label>Business name <span class="hint">Shown to clients and on PayPal invoices. Leave empty to use your name.</span><input type="text" name="businessName" autocomplete="organization"></label>
+      <label>Email<input type="email" name="email" autocomplete="email" required></label>
+      <label>Password <span class="hint">At least 10 characters.</span><input type="password" name="password" autocomplete="new-password" minlength="10" required></label>
+      <button class="btn btn-primary" type="submit">Create account</button>
+    </form>
+    <p class="auth-alt" style="font-size:13px;color:var(--muted)">By creating an account you agree to the <a href="/terms">terms</a> and <a href="/privacy">privacy policy</a>.</p>
+    <p class="auth-alt">Already have an account? <a href="/signin">Sign in</a></p>
+  </div>
+</section>
+<script type="module" src="/js/auth-page.js"></script>

@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "mammoth": "^1.13.0",
+    "pg": "^8.23.1",
     "unpdf": "^1.9.1"
   },
   "description": "Turn agreed work into evidence-backed PayPal invoices.",

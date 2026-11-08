@@ -1,16 +1,13 @@
 // The ScopePay workflow: agreed terms → evidence → AI review → client acceptance
 // → PayPal invoice → payment. All state transitions and guards live here.
 
-import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
-import path from 'node:path';
 import { config } from './config.js';
-import { newId, now, logActivity, saveProject } from './store.js';
+import { newId, now, logActivity, saveProject, putUpload, getUpload, deleteUpload } from './store.js';
 import { reviewMilestone } from './ai/evidence.js';
 import { checkScope, draftReminder } from './ai/scope.js';
 import { payments, PAID_STATUSES } from './paypal.js';
 import { IMAGE_TYPES, documentText, badRequest } from './documents.js';
 
-const uploadDir = (projectId) => path.join(config.dataDir, 'uploads', projectId);
 const conflict = (message) => Object.assign(new Error(message), { status: 409 });
 
 export const milestoneOf = (project, id) => {
@@ -29,8 +26,7 @@ export async function addEvidence(project, { milestoneId, note, file }) {
   const milestone = milestoneOf(project, milestoneId);
   if (['approved', 'invoiced', 'paid'].includes(milestone.status)) throw conflict('This milestone is already approved.');
   const id = newId('ev');
-  await mkdir(uploadDir(project.id), { recursive: true });
-  await writeFile(path.join(uploadDir(project.id), id), file.buffer, { mode: 0o600 });
+  await putUpload(project.id, id, file.buffer);
   const isImage = IMAGE_TYPES.has(file.mime);
   const text = isImage ? '' : (await documentText(file)).slice(0, 20000);
   project.evidence.push({ id, milestoneId, filename: file.filename, mime: file.mime, size: file.buffer.length, kind: isImage ? 'image' : 'document', text, note: String(note || '').slice(0, 300), uploadedAt: now() });
@@ -45,14 +41,14 @@ export async function removeEvidence(project, evidenceId) {
   const milestone = milestoneOf(project, item.milestoneId);
   if (!['in_progress', 'changes_requested', 'submitted'].includes(milestone.status)) throw conflict('Approved evidence cannot be removed.');
   project.evidence = project.evidence.filter((e) => e.id !== evidenceId);
-  await rm(path.join(uploadDir(project.id), evidenceId), { force: true });
+  await deleteUpload(project.id, evidenceId);
   return saveProject(project);
 }
 
 export async function evidenceFile(project, evidenceId) {
   const item = project.evidence.find((e) => e.id === evidenceId);
   if (!item) return null;
-  return { item, buffer: await readFile(path.join(uploadDir(project.id), evidenceId)) };
+  return { item, buffer: await getUpload(project.id, evidenceId) };
 }
 
 // --- AI review ---------------------------------------------------------------------
@@ -63,7 +59,7 @@ export async function runReview(project, milestoneId) {
   const loaded = await Promise.all(
     items.map(async (e) => ({
       ...e,
-      base64: e.kind === 'image' ? (await readFile(path.join(uploadDir(project.id), e.id))).toString('base64') : undefined,
+      base64: e.kind === 'image' ? (await getUpload(project.id, e.id)).toString('base64') : undefined,
     })),
   );
   const review = await reviewMilestone(milestone, loaded);

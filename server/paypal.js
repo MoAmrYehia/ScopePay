@@ -54,7 +54,7 @@ function invoicePayload(project, invoice, number) {
       memo: `ScopePay ${invoice.kind} ${invoice.targetId}`,
     },
     invoicer: {
-      business_name: config.paypal.businessName,
+      business_name: project.freelancer?.businessName || config.paypal.businessName,
       ...(config.paypal.invoicerEmail ? { email_address: config.paypal.invoicerEmail } : {}),
     },
     primary_recipients: [{ billing_info: { business_name: project.client.name, email_address: project.client.email } }],

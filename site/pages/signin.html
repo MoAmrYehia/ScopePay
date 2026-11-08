@@ -1,0 +1,17 @@
+<!--{"title": "Sign in", "description": "Sign in to ScopePay."}-->
+<section class="auth">
+  <div class="auth-card">
+    <h1>Sign in</h1>
+    <p class="sub">Welcome back. Your projects are where you left them.</p>
+    <form class="auth-form" data-auth="signin" novalidate>
+      <div class="form-error" role="alert" hidden></div>
+      <label>Email<input type="email" name="email" autocomplete="email" required></label>
+      <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
+      <button class="btn btn-primary" type="submit">Sign in</button>
+    </form>
+    <p class="auth-alt">New to ScopePay? <a href="/signup">Create an account</a></p>
+    <div class="auth-divider">or</div>
+    <a class="btn btn-outline auth-demo" href="/demo">Try the live demo without an account</a>
+  </div>
+</section>
+<script type="module" src="/js/auth-page.js"></script>
