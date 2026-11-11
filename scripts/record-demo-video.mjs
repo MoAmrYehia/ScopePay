@@ -8,7 +8,7 @@
 
 import { chromium } from 'playwright';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
@@ -100,10 +100,11 @@ async function scrollTo(locator, offset = 90) {
 }
 const scrollTop = async () => { await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' })); await wait(700); };
 
+// Title cards are set with page.setContent, which cannot load the server's fonts
+// cross-origin, so the font files are embedded as data URLs.
+const fontFace = (weight) => `@font-face { font-family: 'IBM Plex Sans'; font-weight: ${weight}; src: url(data:font/woff2;base64,${readFileSync(`public/fonts/ibm-plex-sans-latin-${weight}-normal.woff2`).toString('base64')}) format('woff2'); }`;
 const card = (body) => `<!doctype html><html><head><meta charset="utf-8"><style>
-  @font-face { font-family: 'IBM Plex Sans'; font-weight: 400; src: url('${BASE}/fonts/ibm-plex-sans-latin-400-normal.woff2'); }
-  @font-face { font-family: 'IBM Plex Sans'; font-weight: 300; src: url('${BASE}/fonts/ibm-plex-sans-latin-300-normal.woff2'); }
-  @font-face { font-family: 'IBM Plex Sans'; font-weight: 600; src: url('${BASE}/fonts/ibm-plex-sans-latin-600-normal.woff2'); }
+  ${fontFace(300)} ${fontFace(400)} ${fontFace(600)}
   html, body { margin: 0; height: 100%; background: #0f2747; color: #fff; font-family: 'IBM Plex Sans', sans-serif; }
   .wrap { height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 0 110px; box-sizing: border-box; }
   .mark { display: inline-flex; align-items: center; gap: 14px; font-weight: 600; font-size: 30px; }
