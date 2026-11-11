@@ -14,8 +14,8 @@ const SAMPLE_FILES = [
   ['services-v2.png', 'Services page (fixed)'],
 ];
 
-export async function renderProject(view, id) {
-  const state = { project: null, milestoneId: null, tab: 'scope', scopeDraft: '' };
+export async function renderProject(view, id, initialMilestoneId = null) {
+  const state = { project: null, milestoneId: initialMilestoneId, tab: 'scope', scopeDraft: '' };
   const base = `/api/projects/${id}`;
 
   async function load(sync = false) {

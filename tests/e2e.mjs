@@ -117,7 +117,24 @@ await shot('08-paid');
 // 8. Invoices page and new-project extraction
 await page.goto(BASE + '/app#/invoices');
 await page.getByRole('heading', { name: 'Invoices' }).waitFor();
+await page.locator('#invoice-grid .ag-row').first().waitFor();
+await page.getByRole('button', { name: /^Paid/ }).click();
+await page.waitForFunction(() => {
+  const rows = [...document.querySelectorAll('#invoice-grid .ag-grid-scrolling-rows .ag-row:not(.ag-opacity-zero)')].filter((r) => r.querySelector('.chip'));
+  return rows.length > 0 && rows.every((r) => /Paid/.test(r.innerText));
+}, null, { timeout: 5000 });
+await page.getByRole('button', { name: /^All/ }).click();
+assert.match(await page.locator('#invoice-grid .grid-total').first().innerText(), /invoices/);
+const csv = page.waitForEvent('download');
+await page.getByRole('button', { name: 'Export CSV' }).click();
+assert.equal((await csv).suggestedFilename(), 'scopepay-invoices.csv');
 await shot('09-invoices');
+await page.goto(BASE + '/app#/projects');
+await page.locator('#pipeline-grid .ag-row').first().waitFor();
+await page.locator('#pipeline-grid .ag-row', { hasText: 'Launch and handover' }).first().click();
+await page.getByRole('heading', { name: 'Acceptance checklist' }).waitFor();
+assert.match(await page.locator('.ms-tab.active').innerText(), /Launch and handover/);
+step('AG Grid invoice ledger (filter, totals, CSV) and payment pipeline (row opens milestone)');
 await page.goto(BASE + '/app#/new');
 await page.getByRole('button', { name: /Use the sample website agreement/ }).click();
 await page.getByRole('heading', { name: 'Agreement' }).waitFor({ timeout: 120_000 });

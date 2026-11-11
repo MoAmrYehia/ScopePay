@@ -20,6 +20,15 @@ flowchart LR
   H -->|webhook: INVOICE.PAID| I[Milestone paid]
 ```
 
+## Built with AG Grid
+
+The freelancer's money views run on [AG Grid](https://www.ag-grid.com/) (Community edition, MIT), served from the app with a theme matched to ScopePay:
+
+- **Invoice ledger** (`/app#/invoices`): every PayPal invoice with who accepted it and when, channel, status and amount. Status filters (ready to send, awaiting payment, paid) use AG Grid's external filter; search uses the quick filter; a pinned totals row recalculates for whatever is shown; **Export CSV** produces a file for an accountant.
+- **Payment pipeline** (`/app#/projects`): every milestone across all projects, from evidence check to PayPal payment, with an inline evidence bar (met, partial, missing). Sort by due date or amount, filter by stage, search, export, and click a row to open that milestone.
+
+See `public/js/grid.js` (theme and defaults) and `public/js/app.js` (`mountPipeline`, `invoicesPage`).
+
 ## The demo in one story
 
 A website agreement requires five pages in milestone 2. The designer uploads four screenshots.
@@ -101,6 +110,26 @@ Each account sees only its own projects. Its business name appears on client rev
 5. Back in the workspace: **Send via PayPal**. Pay from the payer view with the sandbox buyer account (or **Simulate payment** in demo mode).
 6. **New project → Use the sample website agreement** shows extraction with clause highlighting. Upload your own PDF or DOCX agreement with an AI key set.
 
+## Demo video
+
+`scripts/record-demo-video.mjs` records the under-3-minute demo from a running server (Chrome screencast at 1920×1080, on-page cursor and subtitles, assembled with ffmpeg at 30 fps). It follows the narration in `scripts/demo-narration.json`: each line is a cue, and the step it describes plays while the line is on screen.
+
+```bash
+npm start & BASE_URL=http://localhost:3000 OUT=demo node scripts/record-demo-video.mjs   # writes demo/scopepay-demo.mp4
+```
+
+Point `BASE_URL` at a server with AI and PayPal sandbox keys to record the live integrations.
+
+To add the voice-over, synthesise the narration first and pass the folder as `VOICE`. `scripts/kokoro-voiceover.py` uses the open [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) text-to-speech model (Apache 2.0) with `onnxruntime` and `espeak-ng`; it needs the ONNX model, its `vocab.json` and a voice file such as `af_heart.bin`.
+
+```bash
+python3 scripts/kokoro-voiceover.py --model kokoro.onnx --vocab vocab.json --voice af_heart.bin \
+    --script scripts/demo-narration.json --out voice
+VOICE=voice BASE_URL=http://localhost:3000 OUT=demo node scripts/record-demo-video.mjs
+```
+
+Each step then lasts as long as its spoken line, and the clips are mixed in at their cues at about -16 LUFS.
+
 ## Tests
 
 ```bash
@@ -136,7 +165,7 @@ This is a hackathon project. Accounts have no email verification or password res
 
 ## Built with
 
-Node.js · PayPal Invoicing v2 REST API and webhooks (sandbox) · OpenAI or Anthropic models (vision and tool use) · unpdf · mammoth · Playwright · Render
+Node.js · PayPal Invoicing v2 REST API and webhooks (sandbox) · AG Grid · Postgres · OpenAI or Anthropic models (vision and tool use) · unpdf · mammoth · Playwright · Render
 
 ## License
 

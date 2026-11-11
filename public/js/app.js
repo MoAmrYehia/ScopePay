@@ -5,6 +5,7 @@ import { esc, money, balance, date, icon, invoiceChip, modeChip, toast, pageBand
 import { renderProject } from './views/project.js';
 import { renderNewProject } from './views/new-project.js';
 import { app } from './state.js';
+import { ledgerGrid, twoLine } from './grid.js';
 
 const NAV = [
   ['#/', 'Overview'],
@@ -160,24 +161,139 @@ function overview(view) {
 
 function projectsPage(view) {
   view.innerHTML = `${pageBand('Projects', { sub: 'Agreed work, milestone by milestone, with the evidence behind each payment.', actions: `<a class="btn primary" href="#/new">${icon('plus')} New project</a>` })}
-    <div class="content"><section class="card">${projectLedger(app.projects)}</section></div>`;
+    <div class="content stack">
+      <section class="card">${projectLedger(app.projects)}</section>
+      ${app.projects.length ? pipelineSection() : ''}
+    </div>`;
+  if (app.projects.length) mountPipeline(view);
 }
 
+// --- payment pipeline (AG Grid): every milestone across projects -------------------------
+
+const STAGES = ['in_progress', 'changes_requested', 'submitted', 'approved', 'invoiced', 'paid'];
+const STAGE_LABEL = { in_progress: 'In progress', changes_requested: 'Changes requested', submitted: 'Awaiting client', approved: 'Accepted', invoiced: 'Invoiced', paid: 'Paid' };
+
+function pipelineRows() {
+  return app.projects.flatMap((p) => p.terms.milestones.map((m) => {
+    const review = p.reviews[m.id];
+    const invoice = p.invoices.find((i) => i.kind === 'milestone' && i.targetId === m.id);
+    return {
+      projectId: p.id, milestoneId: m.id, project: p.name, client: p.client.name, milestone: `${m.index}. ${m.name}`,
+      due: m.dueDate, status: m.status, stage: STAGES.indexOf(m.status), currency: p.currency, amount: m.amount,
+      criteria: m.deliverables.length, met: review ? review.counts.met : null, partial: review?.counts.partial || 0, missing: review?.counts.missing || 0,
+      acceptedBy: invoice?.approvedBy || '', invoice: invoice ? `${invoice.number || 'pending'}` : '', invoiceStatus: invoice?.status || '',
+    };
+  }));
+}
+
+function pipelineSection() {
+  return `<section class="card"><div class="card-head"><div><h2>Payment pipeline</h2><p class="sub" style="margin-top:2px">Every milestone across your projects, from evidence to payment. Click a row to open it.</p></div>
+    <div class="grid-tools"><label class="sr-only" for="pipeline-search">Search milestones</label><input type="text" id="pipeline-search" placeholder="Search milestones" autocomplete="off">
+    <button class="btn small" data-export="pipeline">Export CSV</button></div></div>
+    <div id="pipeline-grid" class="grid-host"></div></section>`;
+}
+
+function mountPipeline(view) {
+  const evidenceCell = (r) => {
+    if (r.met == null) return `<span class="grid-muted">Not reviewed</span>`;
+    const seg = (n, cls) => (n ? `<span class="${cls}" style="flex:${n}"></span>` : '');
+    return `<div class="cell-2" title="${r.met} met, ${r.partial} partial, ${r.missing} missing"><div class="evidence-bar">${seg(r.met, 'met')}${seg(r.partial, 'partial')}${seg(r.missing, 'missing')}</div><small class="grid-muted">${r.met} of ${r.criteria} met${r.missing ? `, ${r.missing} missing` : ''}</small></div>`;
+  };
+  const grid = ledgerGrid(view.querySelector('#pipeline-grid'), {
+    rowData: pipelineRows(),
+    columnDefs: [
+      { headerName: 'Milestone', field: 'milestone', flex: 1.6, minWidth: 220, cellRenderer: (p) => twoLine(`<a href="#/projects/${p.data.projectId}/${p.data.milestoneId}">${esc(p.value)}</a>`, esc(`${p.data.project} for ${p.data.client}`)), getQuickFilterText: (p) => `${p.value} ${p.data.project} ${p.data.client}` },
+      { headerName: 'Due', field: 'due', width: 130, sort: 'asc', valueFormatter: (p) => date(p.value), filter: 'agDateColumnFilter', filterParams: { comparator: (d, v) => (v ? Date.parse(v) - d.getTime() : 0) } },
+      { headerName: 'Stage', field: 'stage', width: 170, valueFormatter: (p) => STAGE_LABEL[p.data.status], cellRenderer: (p) => milestoneChipHtml(p.data.status), filterValueGetter: (p) => STAGE_LABEL[p.data.status], filter: 'agTextColumnFilter' },
+      { headerName: 'Evidence check', field: 'met', width: 170, cellRenderer: (p) => evidenceCell(p.data), comparator: (a, b) => (a ?? -1) - (b ?? -1), filter: false },
+      { headerName: 'Accepted by', field: 'acceptedBy', width: 150, cellRenderer: (p) => (p.value ? esc(p.value) : '<span class="grid-muted">Not yet</span>') },
+      { headerName: 'PayPal invoice', field: 'invoiceStatus', width: 160, cellRenderer: (p) => (p.value ? twoLine(invoiceChip(p.value), `No. ${esc(p.data.invoice)}`) : '<span class="grid-muted">Not issued</span>') },
+      { headerName: 'Amount', field: 'amount', width: 140, type: 'rightAligned', valueFormatter: (p) => money(p.value, p.data?.currency || 'USD'), filter: 'agNumberColumnFilter', cellClass: 'grid-amount' },
+    ],
+    onRowClicked: (e) => { if (!e.event.target.closest('a')) location.hash = `#/projects/${e.data.projectId}/${e.data.milestoneId}`; },
+    rowClass: 'grid-clickable',
+  });
+  view.querySelector('#pipeline-search').addEventListener('input', (e) => grid.setGridOption('quickFilterText', e.target.value));
+  view.querySelector('[data-export="pipeline"]').addEventListener('click', () => grid.exportDataAsCsv({
+    fileName: 'scopepay-payment-pipeline.csv',
+    processCellCallback: (p) => (p.column.getColId() === 'stage' ? STAGE_LABEL[p.node.data.status] : p.column.getColId() === 'due' ? p.value || '' : p.value),
+  }));
+}
+
+const milestoneChipHtml = (status) => {
+  const tone = { in_progress: 'grey', changes_requested: 'amber', submitted: 'blue', approved: 'green', invoiced: 'blue', paid: 'green' }[status] || 'grey';
+  return `<span class="chip ${tone}">${esc(STAGE_LABEL[status] || status)}</span>`;
+};
+
+// --- invoice ledger (AG Grid) -------------------------------------------------------------
+
+const INVOICE_FILTERS = [
+  ['all', 'All', () => true],
+  ['draft', 'Ready to send', (i) => i.status === 'DRAFT'],
+  ['open', 'Awaiting payment', (i) => isOutstanding(i)],
+  ['paid', 'Paid', (i) => isPaid(i)],
+];
+
 function invoicesPage(view) {
-  const invoices = allInvoices().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const row = (i) => `<tr>
-    <td><a href="#/projects/${i.project.id}">${esc(i.title)}</a><small>No. ${esc(i.number || 'pending')}</small></td>
-    <td class="hide-sm">${esc(i.project.client.name)}<small>${esc(i.project.name)}</small></td>
-    <td class="hide-sm">${date(i.approvedAt)}<small>Accepted by ${esc(i.approvedBy)}</small></td>
-    <td class="hide-sm">${modeChip(i.mode)}</td>
-    <td>${invoiceChip(i.status)}</td>
-    <td class="num">${money(i.amount, i.project.currency)}</td></tr>`;
+  const invoices = allInvoices();
+  const rows = invoices.map((i) => ({
+    id: i.id, projectId: i.project.id, title: i.title, number: i.number || 'pending', client: i.project.client.name, project: i.project.name,
+    approvedAt: i.approvedAt, approvedBy: i.approvedBy, sentAt: i.sentAt || null, paidAt: i.paidAt || null, mode: i.mode, status: i.status,
+    amount: i.amount, currency: i.project.currency, kind: i.kind, raw: i,
+  }));
   view.innerHTML = `${pageBand('Invoices', { sub: 'Every invoice is issued from a recorded client acceptance and sent through PayPal.' })}
-    <div class="content"><section class="card table-wrap"><table>
-      <thead><tr><th>Invoice</th><th class="hide-sm">Billed to</th><th class="hide-sm">Accepted</th><th class="hide-sm">Channel</th><th>Status</th><th class="num">Amount</th></tr></thead>
-      <tbody>${invoices.map(row).join('') || '<tr><td colspan="6" class="empty">No invoices yet. One is issued when a client accepts a milestone.</td></tr>'}</tbody>
-      ${invoices.length ? `<tfoot><tr><td colspan="5" class="hide-sm">Total received</td><td class="num">${money(sum(invoices.filter(isPaid)))}</td></tr></tfoot>` : ''}
-    </table></section></div>`;
+    <div class="content">
+      <section class="card">
+        <div class="card-head">
+          <div class="segmented" role="group" aria-label="Filter invoices">${INVOICE_FILTERS.map(([k, label, test], idx) => `<button data-filter="${k}" aria-pressed="${idx === 0}">${label}<span>${invoices.filter(test).length}</span></button>`).join('')}</div>
+          <div class="grid-tools"><label class="sr-only" for="invoice-search">Search invoices</label><input type="text" id="invoice-search" placeholder="Search by client, project or number" autocomplete="off">
+            <button class="btn small" data-export="invoices">Export CSV</button></div>
+        </div>
+        <div id="invoice-grid" class="grid-host"></div>
+      </section>
+    </div>`;
+
+  let active = INVOICE_FILTERS[0];
+  const totals = () => {
+    let shown = 0, paid = 0, count = 0;
+    grid.forEachNodeAfterFilter((n) => { if (n.data) { count++; shown += n.data.amount; if (isPaid(n.data)) paid += n.data.amount; } });
+    grid.setGridOption('pinnedBottomRowData', count ? [{ title: `${count} invoice${count === 1 ? '' : 's'}`, totalRow: true, amount: shown, paidTotal: paid, currency: 'USD' }] : []);
+  };
+  const grid = ledgerGrid(view.querySelector('#invoice-grid'), {
+    rowData: rows,
+    columnDefs: [
+      { headerName: 'Invoice', field: 'title', flex: 1.5, minWidth: 220, sort: null,
+        cellRenderer: (p) => (p.data.totalRow ? `<b>${esc(p.value)}</b>` : twoLine(`<a href="#/projects/${p.data.projectId}">${esc(p.value)}</a>`, `No. ${esc(p.data.number)}`)),
+        getQuickFilterText: (p) => `${p.value} ${p.data.number}` },
+      { headerName: 'Billed to', field: 'client', flex: 1, minWidth: 170, cellRenderer: (p) => (p.data.totalRow ? '' : twoLine(esc(p.value), esc(p.data.project))), getQuickFilterText: (p) => `${p.value} ${p.data.project}` },
+      { headerName: 'Accepted', field: 'approvedAt', width: 170, sort: 'desc', filter: 'agDateColumnFilter', filterParams: { comparator: (d, v) => (v ? Date.parse(v.slice(0, 10)) - d.getTime() : 0) },
+        cellRenderer: (p) => (p.data.totalRow ? '' : twoLine(date(p.value), `by ${esc(p.data.approvedBy)}`)) },
+      { headerName: 'Paid', field: 'paidAt', width: 120, valueFormatter: (p) => (p.data.totalRow ? '' : p.value ? date(p.value) : '—'), filter: false },
+      { headerName: 'Channel', field: 'mode', width: 150, cellRenderer: (p) => (p.data.totalRow ? '' : modeChip(p.value)), filterValueGetter: (p) => ({ sandbox: 'PayPal sandbox', simulated: 'Simulated', sample: 'Sample history' })[p.data.mode] },
+      { headerName: 'Status', field: 'status', width: 160, cellRenderer: (p) => (p.data.totalRow ? (p.data.paidTotal ? `<span class="grid-muted">${money(p.data.paidTotal)} paid</span>` : '') : invoiceChip(p.value)) },
+      { headerName: 'Amount', field: 'amount', width: 150, type: 'rightAligned', filter: 'agNumberColumnFilter', valueFormatter: (p) => money(p.value, p.data?.currency || 'USD'), cellClass: 'grid-amount' },
+    ],
+    isExternalFilterPresent: () => active[0] !== 'all',
+    doesExternalFilterPass: (node) => active[2](node.data),
+    getRowClass: (p) => (p.data.totalRow ? 'grid-total' : 'grid-clickable'),
+    onRowClicked: (e) => { if (!e.data.totalRow && !e.event.target.closest('a')) location.hash = `#/projects/${e.data.projectId}`; },
+    onFilterChanged: totals,
+    onRowDataUpdated: totals,
+    overlayNoRowsTemplate: '<span class="grid-empty">No invoices yet. One is issued when a client accepts a milestone.</span>',
+  });
+  totals();
+
+  view.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+    active = INVOICE_FILTERS.find(([k]) => k === b.dataset.filter);
+    view.querySelectorAll('[data-filter]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    grid.onFilterChanged();
+  }));
+  view.querySelector('#invoice-search').addEventListener('input', (e) => grid.setGridOption('quickFilterText', e.target.value));
+  view.querySelector('[data-export="invoices"]').addEventListener('click', () => grid.exportDataAsCsv({
+    fileName: 'scopepay-invoices.csv',
+    columnKeys: ['title', 'client', 'approvedAt', 'paidAt', 'mode', 'status', 'amount'],
+    shouldRowBeSkipped: (p) => Boolean(p.node.data?.totalRow),
+  }));
 }
 
 function settingsPage(view) {
@@ -227,10 +343,10 @@ export async function route() {
   const root = document.getElementById('app');
   try {
     await refreshProjects();
-    const projectMatch = /^#\/projects\/([\w]+)/.exec(hash);
+    const projectMatch = /^#\/projects\/([\w]+)(?:\/([\w]+))?/.exec(hash);
     if (projectMatch) {
       root.innerHTML = shell('Projects');
-      return renderProject(document.getElementById('view'), projectMatch[1]);
+      return renderProject(document.getElementById('view'), projectMatch[1], projectMatch[2]);
     }
     const pages = { '#/': ['Overview', overview], '#/projects': ['Projects', projectsPage], '#/invoices': ['Invoices', invoicesPage], '#/activity': ['Activity', activityPage], '#/new': ['Projects', renderNewProject], '#/settings': ['', settingsPage] };
     const [label, render] = pages[hash] || pages['#/'];

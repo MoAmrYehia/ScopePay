@@ -376,3 +376,29 @@ button.avatar:hover { border-color: rgba(255, 255, 255, 0.5); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; align-items: end; }
 .form-grid .actions { grid-column: 1 / -1; }
 @media (max-width: 760px) { .form-grid { grid-template-columns: 1fr; } .welcome { padding: 22px; } }
+
+/* ---------- AG Grid ledgers ---------- */
+.grid-host { width: 100%; }
+.grid-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.grid-tools input { width: 260px; min-height: 32px; padding: 5px 10px; font-size: 13px; }
+.cell-2 { display: flex; flex-direction: column; justify-content: center; line-height: 1.3; height: 100%; }
+.cell-2 small { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.cell-2 a { font-weight: 500; }
+.ag-cell { display: flex; align-items: center; }
+.ag-cell.grid-amount { justify-content: flex-end; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ag-row.grid-clickable { cursor: pointer; }
+.ag-row.grid-total { font-weight: 600; background: var(--head); }
+.grid-muted { color: var(--muted); font-size: 12.5px; }
+.grid-empty { color: var(--muted); font-size: 13.5px; }
+.evidence-bar { display: flex; gap: 2px; width: 110px; height: 6px; border-radius: 3px; overflow: hidden; margin-bottom: 4px; }
+.evidence-bar .met { background: var(--pos); }
+.evidence-bar .partial { background: #d48a12; }
+.evidence-bar .missing { background: var(--neg); }
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: #fff; flex-wrap: wrap; }
+.segmented button { padding: 6px 12px; font-size: 13px; color: var(--ink-2); border-left: 1px solid var(--line); display: inline-flex; gap: 6px; align-items: center; }
+.segmented button:first-child { border-left: 0; }
+.segmented button span { font-size: 11.5px; color: var(--muted); background: #eef0f3; border-radius: 9px; padding: 0 6px; }
+.segmented button[aria-pressed="true"] { background: var(--blue-50); color: var(--blue); font-weight: 600; }
+.segmented button[aria-pressed="true"] span { background: #d6e4f8; color: var(--blue); }
+@media (max-width: 760px) { .grid-tools input { width: 100%; } .grid-tools { width: 100%; } }
+.grid-host .ag-grid-scrolling-rows.ag-layout-auto-height { min-height: 58px !important; }

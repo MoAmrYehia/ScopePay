@@ -56,6 +56,10 @@ await page.getByRole('button', { name: 'Simulate payment' }).first().click();
 await page.locator('.callout.green', { hasText: 'Paid' }).waitFor();
 await save('invoice', page, '.grid-2 .stack > section:first-child');
 
+await page.goto(`${BASE}/app#/projects`);
+await page.locator('#pipeline-grid .ag-row').first().waitFor();
+await save('pipeline', page, 'section:has(#pipeline-grid)');
+
 await page.goto(`${BASE}/app#/new`);
 await page.getByRole('button', { name: /Use the sample website agreement/ }).click();
 await page.getByRole('heading', { name: 'Agreement' }).waitFor();
