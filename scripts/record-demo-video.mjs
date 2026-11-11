@@ -145,7 +145,7 @@ scene('problem');
 await showCard(`<h2>Freelance payments stall on three sentences</h2>
   <div class="row"><div><q>That wasn’t in the brief.</q><span>Extra work goes unpaid when nobody can point to the clause.</span></div>
   <div><q>It’s not finished yet.</q><span>“Done” means something different to each side.</span></div>
-  <div><q>We’ll pay once we’ve checked.</q><span>Evidence is scattered across email and chat.</span></div></div>`, 9000);
+  <div><q>We’ll pay once we’ve checked.</q><span>Evidence is scattered across email and chat.</span></div></div>`, 10800);
 
 // 3. The website
 scene('website');
@@ -165,7 +165,7 @@ await click(page.getByRole('button', { name: /Use the sample website agreement/ 
 await page.getByRole('heading', { name: 'Agreement' }).waitFor();
 await caption('<b>AI extracts</b> every milestone, amount and acceptance condition, each quoting its clause.', 4200);
 await click(page.locator('.terms-ms').nth(1).locator('.clause').nth(3), 1600);
-await caption('Every quote is checked word for word against the agreement. You confirm before anything is used.', 4300);
+await caption('Every quote is checked word for word against the agreement. You confirm before anything is used.', 5800);
 
 // 4. Evidence review
 scene('review');
@@ -185,7 +185,7 @@ await click(page.getByRole('button', { name: /Services page \(fixed\)/ }), 700);
 await scrollTo(page.locator('.review-bar'), 120);
 await click(page.getByRole('button', { name: /Re-run/ }), 300);
 await page.waitForFunction(() => !document.querySelector('.review-bar .chip.red'), null, { timeout: 120_000 });
-await caption('Re-run the review: every acceptance condition is now backed by evidence.', 3800);
+await caption('Re-run the review: every acceptance condition is now backed by evidence.', 5200);
 
 // 5. Scope check and change order
 scene('scope');
@@ -261,7 +261,7 @@ await showCard(`<h2>How it’s built</h2><ul>
 // 10. Close
 scene('close');
 await showCard(`<span class="mark"><i>S</i>ScopePay</span><h1 style="font-size:54px">Agreed work. Proven. Paid.</h1>
-  <span class="url">${PUBLIC}/demo</span><p class="small">Open source on GitHub: MoAmrYehia/ScopePay</p>`, 5500);
+  <span class="url">${PUBLIC}/demo</span><p class="small">Open source on GitHub: MoAmrYehia/ScopePay</p>`, 6500);
 
 await cdp.send('Page.stopScreencast');
 const ended = Date.now();
@@ -270,7 +270,7 @@ await browser.close();
 // --- assemble ---------------------------------------------------------------------------
 const lines = [];
 for (let i = 0; i < frames.length; i++) {
-  const next = i + 1 < frames.length ? frames[i + 1].t : frames[i].t + 0.5;
+  const next = i + 1 < frames.length ? frames[i + 1].t : ended / 1000;
   lines.push(`file '${path.resolve(frames[i].file)}'`, `duration ${Math.max(0.001, next - frames[i].t).toFixed(4)}`);
 }
 lines.push(`file '${path.resolve(frames.at(-1).file)}'`);
@@ -279,6 +279,8 @@ const video = path.join(OUT, 'scopepay-demo.mp4');
 execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(OUT, 'frames.txt'),
   '-vf', 'scale=1920:1080:flags=lanczos,fps=30,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-movflags', '+faststart', video + '.part.mp4']);
 execFileSync('mv', [video + '.part.mp4', video]);
-const scenes = marks.map((m, i) => `${m.name} ${((m.t - started) / 1000).toFixed(1)}s`).join(', ');
-await writeFile(path.join(OUT, 'scenes.txt'), scenes + `\nend ${((ended - started) / 1000).toFixed(1)}s\n`);
-console.log(`frames: ${frames.length}, length ≈ ${((ended - started) / 1000).toFixed(1)}s\n${scenes}\nvideo: ${video}`);
+// Scene start times on the video's own clock (0 = first frame), for captions or a voice-over.
+const t0 = frames[0].t;
+const scenes = marks.map((m) => `${m.name}\t${Math.max(0, m.t / 1000 - t0).toFixed(2)}`).join('\n');
+await writeFile(path.join(OUT, 'scenes.tsv'), scenes + `\nend\t${(ended / 1000 - t0).toFixed(2)}\n`);
+console.log(`frames: ${frames.length}, length ${(ended / 1000 - t0).toFixed(1)}s\n${scenes}\nvideo: ${video}`);
