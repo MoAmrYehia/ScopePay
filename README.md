@@ -20,6 +20,15 @@ flowchart LR
   H -->|webhook: INVOICE.PAID| I[Milestone paid]
 ```
 
+## Built with AG Grid
+
+The freelancer's money views run on [AG Grid](https://www.ag-grid.com/) (Community edition, MIT), served from the app with a theme matched to ScopePay:
+
+- **Invoice ledger** (`/app#/invoices`): every PayPal invoice with who accepted it and when, channel, status and amount. Status filters (ready to send, awaiting payment, paid) use AG Grid's external filter; search uses the quick filter; a pinned totals row recalculates for whatever is shown; **Export CSV** produces a file for an accountant.
+- **Payment pipeline** (`/app#/projects`): every milestone across all projects, from evidence check to PayPal payment, with an inline evidence bar (met, partial, missing). Sort by due date or amount, filter by stage, search, export, and click a row to open that milestone.
+
+See `public/js/grid.js` (theme and defaults) and `public/js/app.js` (`mountPipeline`, `invoicesPage`).
+
 ## The demo in one story
 
 A website agreement requires five pages in milestone 2. The designer uploads four screenshots.
@@ -136,7 +145,7 @@ This is a hackathon project. Accounts have no email verification or password res
 
 ## Built with
 
-Node.js · PayPal Invoicing v2 REST API and webhooks (sandbox) · OpenAI or Anthropic models (vision and tool use) · unpdf · mammoth · Playwright · Render
+Node.js · PayPal Invoicing v2 REST API and webhooks (sandbox) · AG Grid · Postgres · OpenAI or Anthropic models (vision and tool use) · unpdf · mammoth · Playwright · Render
 
 ## License
 

@@ -324,6 +324,7 @@ const server = http.createServer(async (req, res) => {
 
     // The public website.
     if (SITE_PAGES.has(pathname)) return sendHtml(res, await renderSitePage(pathname, { user }));
+    if (url.pathname === '/vendor/ag-grid-community.min.js') return void (await serveStatic(res, path.resolve('node_modules/ag-grid-community/dist'), '/ag-grid-community.min.js'));
     if (url.pathname.startsWith('/samples/') && (await serveStatic(res, SAMPLES_DIR, url.pathname.slice('/samples'.length)))) return;
     if (await serveStatic(res, PUBLIC_DIR, url.pathname)) return;
     sendHtml(res, await renderSitePage('/404', { user }), 404);
