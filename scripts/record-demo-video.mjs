@@ -1,14 +1,23 @@
 // Records the ScopePay demo video (under 3 minutes) from a running server.
 // Frames come from Chrome's screencast at 1920x1080, with an on-page cursor
-// and captions, then ffmpeg assembles them at a constant 30 fps.
+// and subtitles, then ffmpeg assembles them at a constant 30 fps.
+//
+// The video follows the narration in scripts/demo-narration.json: each line
+// is a cue, shown as a subtitle while the matching step plays on screen.
 //
 // Usage: BASE_URL=http://localhost:3000 OUT=demo node scripts/record-demo-video.mjs
+//
+// With VOICE=<dir> (one <cue>.wav per line plus durations.json, as written by
+// scripts/kokoro-voiceover.py) each step lasts as long as its spoken line and
+// the voice-over is mixed in. Without it, timing is estimated from the text
+// and the video is silent; cues.tsv lists when each line starts.
+//
 // With an AI key and PayPal sandbox keys set on the server, the video shows
 // the live integrations; otherwise it shows demo mode.
 
 import { chromium } from 'playwright';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
@@ -16,6 +25,9 @@ const BASE = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, ''
 const PUBLIC = (process.env.PUBLIC_DEMO_URL || 'scopepay-wjm5.onrender.com').replace(/^https?:\/\//, '');
 const OUT = process.env.OUT || 'demo';
 const FRAMES = path.join(OUT, 'frames');
+const VOICE = process.env.VOICE || '';
+const narration = JSON.parse(readFileSync(process.env.NARRATION || 'scripts/demo-narration.json', 'utf8'));
+const clipSeconds = VOICE ? JSON.parse(readFileSync(path.join(VOICE, 'durations.json'), 'utf8')) : {};
 await rm(OUT, { recursive: true, force: true });
 await mkdir(FRAMES, { recursive: true });
 
@@ -71,7 +83,45 @@ cdp.on('Page.screencastFrame', ({ data, metadata, sessionId }) => {
 });
 
 const wait = (ms) => page.waitForTimeout(ms);
-const caption = async (html, holdMs = 0) => { await page.evaluate((h) => window.__caption?.(h), html); if (holdMs) await wait(holdMs); };
+const caption = (html) => page.evaluate((h) => window.__caption?.(h), html);
+
+// Narration. say(cue) waits for the previous line to finish, notes when this one
+// starts, and shows it as subtitles one sentence at a time. It returns at once,
+// so the steps that follow play while the line is spoken; spoken() waits it out.
+const LINE_GAP = 350;
+const lines = Object.fromEntries(narration.map((line) => [line.cue, line]));
+const cues = [];
+let voiceEnds = 0;
+let subtitleTimers = [];
+const showSubtitle = async (text) => {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try { return await caption(text); } catch { await new Promise((r) => setTimeout(r, 300)); } // page was navigating
+  }
+};
+async function say(cue, { subtitles = true, note = '' } = {}) {
+  const line = lines[cue];
+  if (!line) throw new Error(`No narration for cue "${cue}"`);
+  await spoken(LINE_GAP);
+  subtitleTimers.forEach(clearTimeout);
+  subtitleTimers = [];
+  const ms = (clipSeconds[cue] ?? line.text.split(/\s+/).length / 2.6) * 1000;
+  cues.push({ cue, t: Date.now() });
+  voiceEnds = Date.now() + ms;
+  if (!subtitles) return;
+  const sentences = (line.caption || line.text).split(/(?<=[.?!])\s+/);
+  if (note) sentences[sentences.length - 1] += ` ${note}`;
+  const total = sentences.join('').length;
+  let offset = 0;
+  for (const sentence of sentences) {
+    if (offset === 0) await showSubtitle(sentence);
+    else subtitleTimers.push(setTimeout(() => showSubtitle(sentence), offset));
+    offset += ms * sentence.length / total;
+  }
+}
+async function spoken(extra = 300) {
+  const left = voiceEnds + extra - Date.now();
+  if (left > 0) await wait(left);
+}
 const marks = [];
 const scene = (name) => { marks.push({ name, t: Date.now() }); console.log('scene', name); };
 
@@ -119,168 +169,215 @@ const card = (body) => `<!doctype html><html><head><meta charset="utf-8"><style>
   ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 22px 56px; }
   li { font-size: 21px; color: #c3d1e6; line-height: 1.4; border-left: 3px solid #7fb0f5; padding-left: 16px; }
   li b { display: block; color: #fff; font-size: 23px; font-weight: 600; margin-bottom: 4px; }
-  .url { margin-top: 40px; display: inline-block; background: #fff; color: #0f2747; font-size: 30px; font-weight: 600; padding: 14px 26px; border-radius: 10px; }
+  .url { margin-top: 40px; align-self: flex-start; background: #fff; color: #0f2747; font-size: 30px; font-weight: 600; padding: 14px 26px; border-radius: 10px; }
   .small { font-size: 19px; color: #93a7c4; margin-top: 22px; }
   .fade > * { animation: in .7s ease-out both; } .fade > *:nth-child(2) { animation-delay: .25s; } .fade > *:nth-child(3) { animation-delay: .5s; } .fade > *:nth-child(4) { animation-delay: .75s; }
   @keyframes in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 </style></head><body><div class="wrap fade">${body}</div></body></html>`;
 
-async function showCard(body, ms) {
+async function showCard(body) {
+  await spoken(LINE_GAP);
+  subtitleTimers.forEach(clearTimeout);
   await page.setContent(card(body), { waitUntil: 'load' });
   await page.evaluate(() => document.fonts.ready);
   await caption('');
-  await wait(ms);
 }
 
 await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 92, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 });
-const started = Date.now();
 
 // 1. Title
 scene('title');
 await showCard(`<span class="mark"><i>S</i>ScopePay</span><h1>Get paid for the work you agreed to.</h1>
-  <p>AI checks delivered work against the signed agreement. The client accepts with the evidence in front of them. PayPal invoices the moment they do.</p>`, 6500);
+  <p>AI checks delivered work against the signed agreement. The client accepts with the evidence in front of them. PayPal invoices the moment they do.</p>`);
+await wait(600);
+await say('title', { subtitles: false });
+await spoken(1000);
 
 // 2. Problem
 scene('problem');
 await showCard(`<h2>Freelance payments stall on three sentences</h2>
   <div class="row"><div><q>That wasn’t in the brief.</q><span>Extra work goes unpaid when nobody can point to the clause.</span></div>
   <div><q>It’s not finished yet.</q><span>“Done” means something different to each side.</span></div>
-  <div><q>We’ll pay once we’ve checked.</q><span>Evidence is scattered across email and chat.</span></div></div>`, 10800);
+  <div><q>We’ll pay once we’ve checked.</q><span>Evidence is scattered across email and chat.</span></div></div>`);
+await say('problem', { subtitles: false });
+await spoken(700);
 
 // 3. The website
 scene('website');
 await page.goto(`${BASE}/`);
 await page.getByRole('heading', { name: 'Get paid for the work you agreed to.' }).waitFor();
-await caption('<b>ScopePay</b> connects the signed agreement, the delivered work and the PayPal payment.', 4200);
+await say('website');
+await spoken(200);
 await click(page.getByRole('link', { name: 'Try the live demo' }).first(), 600);
 await page.getByRole('heading', { name: 'Your projects' }).waitFor();
-await caption('A freelancer’s workspace: projects, milestones, and what has been paid.', 3000);
+await say('workspace');
+await spoken(300);
 
 // 4. Agreement extraction
 scene('extraction');
 await page.goto(`${BASE}/app#/new`);
 await page.getByRole('button', { name: /Use the sample website agreement/ }).waitFor();
-await caption('Start from the signed agreement: PDF, Word or text.', 2200);
+await say('extract-start');
+await wait(1000);
 await click(page.getByRole('button', { name: /Use the sample website agreement/ }));
 await page.getByRole('heading', { name: 'Agreement' }).waitFor();
-await caption('<b>AI extracts</b> every milestone, amount and acceptance condition, each quoting its clause.', 4200);
-await click(page.locator('.terms-ms').nth(1).locator('.clause').nth(3), 1600);
-await caption('Every quote is checked word for word against the agreement. You confirm before anything is used.', 5800);
+await say('extract-ai');
+await wait(4300);
+await click(page.locator('.terms-ms').nth(1).locator('.clause').nth(3), 600); // "…quotes the clause it came from"
+await say('extract-verify');
+await spoken(600);
 
-// 4. Evidence review
+// 5. Evidence review
 scene('review');
 await page.goto(`${BASE}/app#/projects`);
 await click(page.getByRole('link', { name: /Website redesign/ }).first(), 900);
 await page.getByRole('heading', { name: 'Acceptance checklist' }).waitFor();
-await caption('Milestone 2: the designer has delivered four page screenshots.', 3000);
-await click(page.getByRole('button', { name: /Run AI review/ }), 300);
+await say('review-start');
+await wait(3200);
+await click(page.getByRole('button', { name: /Run AI review/ }), 300); // "Let's run the review."
 await page.locator('.review-bar .chip.green').waitFor({ timeout: 120_000 });
-await wait(400);
-await scrollTo(page.locator('.deliverable', { hasText: 'Portfolio page' }), 260);
-await caption('<b>AI checks each condition against the screenshots.</b> The Portfolio page required by §3.4 is missing.', 5200);
+await say('review-missing');
+await wait(4600);
+await scrollTo(page.locator('.deliverable', { hasText: 'Portfolio page' }), 260); // "The portfolio page…"
+await spoken(300);
 await scrollTo(page.locator('.sample-files'), 200);
-await caption('The designer uploads the missing page and the corrected Services page.', 600);
+await say('review-upload');
 await click(page.getByRole('button', { name: /Portfolio page/ }), 700);
 await click(page.getByRole('button', { name: /Services page \(fixed\)/ }), 700);
+await spoken(100);
 await scrollTo(page.locator('.review-bar'), 120);
 await click(page.getByRole('button', { name: /Re-run/ }), 300);
 await page.waitForFunction(() => !document.querySelector('.review-bar .chip.red'), null, { timeout: 120_000 });
-await caption('Re-run the review: every acceptance condition is now backed by evidence.', 5200);
+await say('review-rerun');
+await spoken(900);
 
-// 5. Scope check and change order
+// 6. Scope check and change order
 scene('scope');
 await scrollTo(page.locator('.tabs'), 80);
-await caption('The client writes: <b>“Can you also add a blog?”</b> Is that in the agreement?', 2000);
+await say('scope-ask');
 await click(page.getByRole('button', { name: /Can you also add a blog/ }), 300);
+await spoken(100);
 await click(page.getByRole('button', { name: /Check against agreement/ }), 300);
 await page.locator('.scope-item .chip.red').first().waitFor({ timeout: 120_000 });
 await scrollTo(page.locator('.scope-item').first(), 140);
-await caption('<b>Out of scope:</b> §5.1 excludes a blog. A change order is priced at the agreement’s $95 per hour.', 5000);
+await say('scope-result');
+await spoken(200);
 await click(page.getByRole('button', { name: /Send to client for approval/ }), 900);
 
-// 6. Client acceptance
+// 7. Client acceptance
 scene('client');
 await scrollTop();
-await caption('Share the evidence pack with the client.', 1200);
+await say('client-share');
 await click(page.getByRole('button', { name: /Share for client acceptance/ }), 900);
 const portalUrl = await page.getByRole('link', { name: /Open client view/ }).getAttribute('href');
+await spoken(100);
 await page.goto(portalUrl);
 await page.getByRole('heading', { name: /Development/ }).waitFor();
-await caption('The client sees each screenshot beside the clause it satisfies. <b>No account needed.</b>', 3600);
+await say('client-view');
+await wait(1700);
 const review = page.locator('section', { hasText: 'Ready for your acceptance' });
-await scrollTo(review.locator('.deliverable').first(), 200);
-await wait(1400);
+await scrollTo(review.locator('.deliverable').first(), 200); // "…each screenshot next to the clause"
+await spoken(300);
+await say('client-accept');
 await type(review.getByPlaceholder('e.g. Dana Ortiz'), 'Dana Ortiz');
-await caption('They accept with their name. People decide; AI only prepares the evidence.', 1500);
+await wait(700);
 await click(review.getByRole('button', { name: /Accept milestone/ }), 1200);
+await spoken(300);
 const order = page.locator('section', { hasText: 'Change request' });
 await scrollTo(order, 120);
-await caption('They approve the blog change order too.', 1200);
+await say('client-order');
 await type(order.getByPlaceholder('e.g. Dana Ortiz'), 'Dana Ortiz');
 await click(order.getByRole('button', { name: /Approve change order/ }), 1300);
 await scrollTo(page.locator('h2', { hasText: 'Invoices' }), 120);
-await caption('<b>Acceptance issues the PayPal invoice automatically</b>, with the approval recorded on it.', 3800);
+await say('client-invoice');
+await spoken(900);
 
-// 7. PayPal invoice
+// 8. PayPal invoice
 scene('paypal');
 await page.goto(page.url().split('/portal.html')[0] + '/app#/projects');
 await click(page.getByRole('link', { name: /Website redesign/ }).first(), 900);
 await page.getByRole('heading', { name: 'PayPal invoice' }).first().waitFor();
-await caption('Send it through <b>PayPal Invoicing</b>: create, send, track and remind.', 1600);
+await say('paypal-send');
+await wait(1500);
 await click(page.getByRole('button', { name: 'Send via PayPal' }).first(), 1200);
 const simulate = page.getByRole('button', { name: 'Simulate payment' }).first();
 if (await simulate.count()) {
-  await caption('When the client pays, PayPal’s webhook marks the milestone paid. (Payment simulated in demo mode.)', 1800);
+  await say('paypal-paid', { note: '(Payment simulated here: demo mode.)' });
+  await wait(1000);
   await click(simulate, 1400);
   await page.locator('.callout.green', { hasText: 'Paid' }).first().waitFor();
-  await wait(2200);
 } else {
-  await caption('Sent from the PayPal sandbox. When the client pays, a verified PayPal webhook marks the milestone paid.', 5000);
+  await say('paypal-paid');
 }
+await spoken(1000);
 
-// 8. AG Grid views
+// 9. AG Grid views
 scene('grids');
 await page.goto(`${BASE}/app#/projects`);
 await page.locator('#pipeline-grid .ag-row').first().waitFor();
 await scrollTo(page.locator('section:has(#pipeline-grid)'), 90);
-await caption('Every milestone in one <b>payment pipeline</b>, built with <b>AG Grid</b>.', 4000);
+await say('grid-pipeline');
+await spoken(500);
 await page.goto(`${BASE}/app#/invoices`);
 await page.locator('#invoice-grid .ag-row').first().waitFor();
-await caption('The invoice ledger: filter, search, live totals and CSV export for the accountant.', 1800);
-await click(page.getByRole('button', { name: /^Paid/ }), 1100);
-await click(page.getByRole('button', { name: /^All/ }), 2200);
+await say('grid-ledger');
+await wait(1300);
+await click(page.getByRole('button', { name: /^Paid/ }), 1100); // "…filters, live totals…"
+await click(page.getByRole('button', { name: /^All/ }), 1100);
+await spoken(700);
 
-// 9. How it's built
+// 10. How it's built
 scene('built');
 await showCard(`<h2>How it’s built</h2><ul>
   <li><b>PayPal Invoicing v2</b>Invoice created on client acceptance, sent, tracked and reminded; verified webhooks mark it paid.</li>
   <li><b>AI with citations</b>Structured extraction and vision review; every term and verdict quotes its clause.</li>
   <li><b>People decide</b>You confirm terms, the client accepts. AI never sends money.</li>
-  <li><b>AG Grid, Node, Postgres, Render</b>Accounts, client links, audit trail, 14 unit tests and a browser walkthrough.</li></ul>`, 11000);
+  <li><b>AG Grid, Node, Postgres, Render</b>Accounts, client links, audit trail, 14 unit tests and a browser walkthrough.</li></ul>`);
+await say('built', { subtitles: false });
+await spoken(1500);
 
-// 10. Close
+// 11. Close
 scene('close');
 await showCard(`<span class="mark"><i>S</i>ScopePay</span><h1 style="font-size:54px">Agreed work. Proven. Paid.</h1>
-  <span class="url">${PUBLIC}/demo</span><p class="small">Open source on GitHub: MoAmrYehia/ScopePay</p>`, 6500);
+  <span class="url">${PUBLIC}/demo</span><p class="small">Open source on GitHub: MoAmrYehia/ScopePay</p>`);
+await say('close', { subtitles: false });
+await spoken(3200);
 
 await cdp.send('Page.stopScreencast');
 const ended = Date.now();
 await browser.close();
 
 // --- assemble ---------------------------------------------------------------------------
-const lines = [];
+const list = [];
 for (let i = 0; i < frames.length; i++) {
   const next = i + 1 < frames.length ? frames[i + 1].t : ended / 1000;
-  lines.push(`file '${path.resolve(frames[i].file)}'`, `duration ${Math.max(0.001, next - frames[i].t).toFixed(4)}`);
+  list.push(`file '${path.resolve(frames[i].file)}'`, `duration ${Math.max(0.001, next - frames[i].t).toFixed(4)}`);
 }
-lines.push(`file '${path.resolve(frames.at(-1).file)}'`);
-await writeFile(path.join(OUT, 'frames.txt'), lines.join('\n'));
+list.push(`file '${path.resolve(frames.at(-1).file)}'`);
+await writeFile(path.join(OUT, 'frames.txt'), list.join('\n'));
 const video = path.join(OUT, 'scopepay-demo.mp4');
+const silent = path.join(OUT, 'silent.mp4');
 execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(OUT, 'frames.txt'),
-  '-vf', 'scale=1920:1080:flags=lanczos,fps=30,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-movflags', '+faststart', video + '.part.mp4']);
-execFileSync('mv', [video + '.part.mp4', video]);
-// Scene start times on the video's own clock (0 = first frame), for captions or a voice-over.
+  '-vf', 'scale=1920:1080:flags=lanczos,fps=30,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-movflags', '+faststart', silent]);
+
+// Scene and narration start times on the video's own clock (0 = first frame).
 const t0 = frames[0].t;
-const scenes = marks.map((m) => `${m.name}\t${Math.max(0, m.t / 1000 - t0).toFixed(2)}`).join('\n');
-await writeFile(path.join(OUT, 'scenes.tsv'), scenes + `\nend\t${(ended / 1000 - t0).toFixed(2)}\n`);
-console.log(`frames: ${frames.length}, length ${(ended / 1000 - t0).toFixed(1)}s\n${scenes}\nvideo: ${video}`);
+const at = (ms) => Math.max(0, ms / 1000 - t0);
+const length = at(ended);
+const scenes = marks.map((m) => `${m.name}\t${at(m.t).toFixed(2)}`).join('\n');
+await writeFile(path.join(OUT, 'scenes.tsv'), scenes + `\nend\t${length.toFixed(2)}\n`);
+await writeFile(path.join(OUT, 'cues.tsv'), cues.map((c) => `${c.cue}\t${at(c.t).toFixed(2)}`).join('\n') + '\n');
+
+if (VOICE) {
+  // Place each spoken line at its cue, bring the mix to about -16 LUFS, and add it to the video.
+  const clips = cues.filter((c) => existsSync(path.join(VOICE, `${c.cue}.wav`)));
+  const inputs = clips.flatMap((c) => ['-i', path.join(VOICE, `${c.cue}.wav`)]);
+  const placed = clips.map((c, i) => `[${i + 1}:a]aresample=48000,adelay=${Math.round(at(c.t) * 1000)}:all=1[a${i}]`);
+  const mix = `${clips.map((_, i) => `[a${i}]`).join('')}amix=inputs=${clips.length}:normalize=0:dropout_transition=0,volume=${process.env.VOICE_GAIN || '5dB'},alimiter=limit=0.84:attack=3:release=60:level=disabled,apad,aformat=channel_layouts=stereo[voice]`;
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', silent, ...inputs, '-filter_complex', [...placed, mix].join(';'),
+    '-map', '0:v', '-map', '[voice]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-t', length.toFixed(2), '-movflags', '+faststart', video + '.part.mp4']);
+  execFileSync('mv', [video + '.part.mp4', video]);
+} else {
+  execFileSync('cp', [silent, video]);
+}
+console.log(`frames: ${frames.length}, length ${length.toFixed(1)}s, ${VOICE ? 'with voice-over' : 'silent'}\n${scenes}\nvideo: ${video}`);

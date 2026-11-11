@@ -112,13 +112,23 @@ Each account sees only its own projects. Its business name appears on client rev
 
 ## Demo video
 
-`scripts/record-demo-video.mjs` records the under-3-minute demo from a running server (Chrome screencast at 1920×1080, on-page cursor and captions, assembled with ffmpeg at 30 fps):
+`scripts/record-demo-video.mjs` records the under-3-minute demo from a running server (Chrome screencast at 1920×1080, on-page cursor and subtitles, assembled with ffmpeg at 30 fps). It follows the narration in `scripts/demo-narration.json`: each line is a cue, and the step it describes plays while the line is on screen.
 
 ```bash
 npm start & BASE_URL=http://localhost:3000 OUT=demo node scripts/record-demo-video.mjs   # writes demo/scopepay-demo.mp4
 ```
 
 Point `BASE_URL` at a server with AI and PayPal sandbox keys to record the live integrations.
+
+To add the voice-over, synthesise the narration first and pass the folder as `VOICE`. `scripts/kokoro-voiceover.py` uses the open [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) text-to-speech model (Apache 2.0) with `onnxruntime` and `espeak-ng`; it needs the ONNX model, its `vocab.json` and a voice file such as `af_heart.bin`.
+
+```bash
+python3 scripts/kokoro-voiceover.py --model kokoro.onnx --vocab vocab.json --voice af_heart.bin \
+    --script scripts/demo-narration.json --out voice
+VOICE=voice BASE_URL=http://localhost:3000 OUT=demo node scripts/record-demo-video.mjs
+```
+
+Each step then lasts as long as its spoken line, and the clips are mixed in at their cues at about -16 LUFS.
 
 ## Tests
 
