@@ -110,6 +110,16 @@ Each account sees only its own projects. Its business name appears on client rev
 5. Back in the workspace: **Send via PayPal**. Pay from the payer view with the sandbox buyer account (or **Simulate payment** in demo mode).
 6. **New project → Use the sample website agreement** shows extraction with clause highlighting. Upload your own PDF or DOCX agreement with an AI key set.
 
+## Demo video
+
+`scripts/record-demo-video.mjs` records the under-3-minute demo from a running server (Chrome screencast at 1920×1080, on-page cursor and captions, assembled with ffmpeg at 30 fps):
+
+```bash
+npm start & BASE_URL=http://localhost:3000 OUT=demo node scripts/record-demo-video.mjs   # writes demo/scopepay-demo.mp4
+```
+
+Point `BASE_URL` at a server with AI and PayPal sandbox keys to record the live integrations.
+
 ## Tests
 
 ```bash
